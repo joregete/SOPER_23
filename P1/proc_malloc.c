@@ -17,10 +17,12 @@ int main(void) {
     exit(EXIT_FAILURE);
   } else if (pid == 0) {
     strcpy(sentence, MESSAGE);
+    free(sentence);
     exit(EXIT_SUCCESS);
   } else {
     wait(NULL);
     printf("Parent: %s\n", sentence);
+    free(sentence);
     exit(EXIT_SUCCESS);
   }
 }
