@@ -29,7 +29,7 @@
  * @param Pwhere value of the pipe where we're writing
  * @return 0 if everything goes correctly, 1 if error.
  */
-int miner(int Psince, int Pwhere);
+int miner(int rounds, int nthreads, int Psince, int Pwhere);
 
 
 #endif
