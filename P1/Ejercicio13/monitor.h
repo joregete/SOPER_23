@@ -21,6 +21,8 @@
 #include <string.h>
 #include <errno.h>
 
+#include "pow.h"
+
 
 /**
  * @brief in this function we will monitor the process

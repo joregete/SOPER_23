@@ -7,8 +7,9 @@
  */
 
 #include "miner.h"
-void wait4miner(void *pid);
-void wait4monitor(void *pid);
+#include "monitor.h"
+void *wait4miner(void *pid);
+void *wait4monitor(void *pid);
 
 
 /**
@@ -21,8 +22,8 @@ void wait4monitor(void *pid);
 int main(int argc, char *argv[]){
     int minerPID, monitorPID, rounds, nthreads, target;;
     pthread_t minerThread, monitorThread;
-    int monitorPipe[2], minerPipe[2];
-    int pipeStatus, threadStatus;
+    int monitorPipe[2], minerPipe[2]; // monitorPipe: comunica monitor con miner; minerPipe: comunica miner con monitor
+    int pipeStatus;
 
     if (argc != 4){
         printf("Usage: %s <TARGET> <ROUNDS> <NTHREADS>\n", argv[0]);
@@ -52,16 +53,16 @@ int main(int argc, char *argv[]){
     }
 
     pipeStatus = pipe(monitorPipe);
-    if(pipeStatus == -1){
-        perror("Error creating the pipe");
+    if(pipeStatus < 0){
+        perror("Error creating miner pipe");
         exit(EXIT_FAILURE);
     }
 
     pipeStatus = pipe(minerPipe);
-    if(pipeStatus == -1){
-        perror("Error creating the pipe");
-        close(monitorPipe[0]);
-        close(monitorPipe[1]);
+    if(pipeStatus < 0){
+        perror("Error creating miner pipe");
+        close(monitorPipe[0]); //tengo que cerrar tanto [0] como [1]???
+        close(monitorPipe[1]); //o es suficiente con close(monitorPipe)?
         exit(EXIT_FAILURE);
     }
 
@@ -74,21 +75,34 @@ int main(int argc, char *argv[]){
         close(minerPipe[1]);
         exit(EXIT_FAILURE);
     }
+    
+    if (minerPID == 0){
+        close(monitorPipe[1]);
+        close(minerPipe[0]);
+        if(miner(rounds, nthreads, target, monitorPipe[0], minerPipe[1]) == EXIT_FAILURE){
+            perror("Error executing the miner process");
+            exit(EXIT_FAILURE);
+        } 
+        exit(EXIT_SUCCESS);
+    }
 
     monitorPID = fork();
     if (monitorPID < 0){
         perror("Error creating the monitor process");
         close(monitorPipe[0]);
         close(monitorPipe[1]);
+        close(minerPipe[0]);
+        close(minerPipe[1]);
         exit(EXIT_FAILURE);
     }
     
     if (monitorPID == 0){
-        close(monitorPipe[1]);
-        close(minerPipe[0]);
+        close(monitorPipe[0]);
         close(minerPipe[1]);
-        monitor(monitorPipe[0]);
-        exit(EXIT_SUCCESS);
+        if(monitor(monitorPipe[1], minerPipe[0]) == EXIT_FAILURE){
+            perror("Error executing the monitor process");
+            exit(EXIT_FAILURE);
+        }
     }
 
     close(monitorPipe[0]);
@@ -96,22 +110,22 @@ int main(int argc, char *argv[]){
     close(minerPipe[0]);
     close(minerPipe[1]);
 
-    if(pthread_create(&minerThread, NULL, wait4miner, NULL) != 0){
+    if(pthread_create(&minerThread, NULL, wait4miner, &minerPID)){
         perror("Error creating the miner thread");
         exit(EXIT_FAILURE);
     }
 
-    if(pthread_create(&monitorThread, NULL, wait4monitor, NULL) != 0){
+    if(pthread_create(&monitorThread, NULL, wait4monitor, &monitorPID)){
         perror("Error creating the monitor thread");
         exit(EXIT_FAILURE);
     }
 
-    if(pthread_join(minerThread, NULL) != 0){
+    if(pthread_join(minerThread, NULL)){
         perror("Error joining the miner thread");
         exit(EXIT_FAILURE);
     }
 
-    if(pthread_join(monitorThread, NULL) != 0){
+    if(pthread_join(monitorThread, NULL)){
         perror("Error joining the monitor thread");
         exit(EXIT_FAILURE);
     }
@@ -125,15 +139,14 @@ int main(int argc, char *argv[]){
  * @param pid pid of the miner process
  * @return void
  */
-void wait4miner(void *pid){
+void *wait4miner(void *pid){
     int status;
     waitpid(*(int *)pid, &status, 0);
-    if(WIFEXITED(status)){
+    if(WIFEXITED(status))
         printf("Miner process finished with status %d \n", WEXITSTATUS(status));
-    }
-    else{
+    else
         printf("Miner process finished abnormally \n");
-    }
+    
     exit(EXIT_SUCCESS);
 }
 
@@ -143,7 +156,7 @@ void wait4miner(void *pid){
  * @param pid pid of the monitor process
  * @return void
  */
-void wait4monitor(void *pid){
+void *wait4monitor(void *pid){
     int status;
     waitpid(*(int *)pid, &status, 0);
     if(WIFEXITED(status)){
