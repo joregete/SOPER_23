@@ -25,11 +25,11 @@
 /**
  * @brief Computes the POW
  * @author Enmanuel Abreu & Jorge Álvarez
- * @param Psince value since where we're start reading the pipe
- * @param Pwhere value of the pipe where we're writing
+ * @param monitorPipe value since where we're start reading the pipe
+ * @param minerPipe value of the pipe where we're writing
  * @return 0 if everything goes correctly, 1 if error.
  */
-int miner(int rounds, int nthreads, long target, int Psince, int Pwhere);
+int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe);
 
 
 #endif

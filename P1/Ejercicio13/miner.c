@@ -16,6 +16,12 @@ typedef struct _minerData {
 
 static MinerData minerData;
 
+/**
+ * @brief Function that will execute the threads
+ * 
+ * @param args 
+ * @return void* 
+ */
 void* work(void* args) {
     int aux;
     MinerData *minerData = (MinerData*) args;
@@ -29,19 +35,19 @@ void* work(void* args) {
     return NULL;
 }
 
-int miner (int rounds, int nthreads, long target, int Psince, int Pwhere){
+int miner (int rounds, int nthreads, long target, int monitorPipe, int minerPipe){
     int i, j;
-    pthread_t* threads;
+    pthread_t *threads;
     char resp;
 
     threads = (pthread_t*) malloc(nthreads * sizeof(pthread_t));
     if(threads == NULL){
         perror("Error allocating memory for the threads");
-        close(Psince);
-        close(Pwhere);
+        close(monitorPipe);
+        close(minerPipe);
         exit(EXIT_FAILURE);
     }
-    //minerData = (struct _minerData*) malloc(nthreads * sizeof(struct _minerData));
+    //minerData = (struct _minerData*) malloc(nthreads * sizeof(_minerData));
 
     minerData.solution = target;
     for (i = 0; rounds <= 0 || i < rounds; i++){
@@ -49,23 +55,23 @@ int miner (int rounds, int nthreads, long target, int Psince, int Pwhere){
         minerData.target = minerData.solution;
         minerData.solution = -1;
 
-
-        for (j = 0; j<nthreads; j++){
-            if (pthread_create(&threads[j], NULL, work, &minerData)){
+        for (j = 0; j < nthreads; j++){
+            if(pthread_create(&threads[j], NULL, work, &minerData)){
                 perror("pthread_create");
                 break;
             }
         }
 
-        for (j = 0; j<nthreads; j++){
-            if (pthread_join(threads[j], NULL)){
+        for (j = 0; j < nthreads; j++){
+            if(pthread_join(threads[j], NULL)){
                 perror("pthread_join");
                 break;
             }
         }
-        write(Pwhere, &minerData.target, sizeof(int)*2);
-        read(Psince, &resp, sizeof(char));
-        if (!resp){
+
+        write(minerPipe, &minerData.target, sizeof(int)*2);
+        read(monitorPipe, &resp, sizeof(char));
+        if(!resp){
             printf("The solution has been invalidated\n");
             exit(EXIT_FAILURE);
         }

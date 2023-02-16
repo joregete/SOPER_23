@@ -32,35 +32,35 @@ int main(int argc, char *argv[]){
 
     target = atoi(argv[1]);
     if(target < 0 || target > POW_LIMIT ){
-        fprintf(stderr, "TATGET_INI must be between 0 and %d", POW_LIMIT);
+        fprintf(stderr, "TATGET_INI must be between 0 and %d\n", POW_LIMIT);
         exit(EXIT_FAILURE);
     }
 
     rounds = atoi(argv[2]);
     if (rounds <= 0){
-        fprintf(stderr, "ROUNDS have to be greater than 0");
+        fprintf(stderr, "ROUNDS have to be greater than 0\n");
         exit(EXIT_FAILURE);
     }
 
     nthreads = atoi(argv[3]);
     if (nthreads <= 0){
-        fprintf(stderr, "The amount of miners(threads) have to be greater than 0");
+        fprintf(stderr, "The amount of miners(threads) have to be greater than 0\n");
         exit(EXIT_FAILURE);
     }
     if (nthreads > MAX_MINERS){
-        fprintf(stderr, "MAX_MINERS have to be smaller than %d", MAX_MINERS);
+        fprintf(stderr, "MAX_MINERS have to be smaller than %d\n", MAX_MINERS);
         exit(EXIT_FAILURE);
     }
 
     pipeStatus = pipe(monitorPipe);
     if(pipeStatus < 0){
-        perror("Error creating miner pipe");
+        perror("Error creating miner pipe\n");
         exit(EXIT_FAILURE);
     }
 
     pipeStatus = pipe(minerPipe);
     if(pipeStatus < 0){
-        perror("Error creating miner pipe");
+        perror("Error creating miner pipe\n");
         close(monitorPipe[0]); //tengo que cerrar tanto [0] como [1]???
         close(monitorPipe[1]); //o es suficiente con close(monitorPipe)?
         exit(EXIT_FAILURE);
@@ -68,7 +68,7 @@ int main(int argc, char *argv[]){
 
     minerPID = fork();
     if (minerPID < 0){
-        perror("Error creating the miner process");
+        perror("Error creating the miner process\n");
         close(monitorPipe[0]);
         close(monitorPipe[1]);
         close(minerPipe[0]);
@@ -80,7 +80,7 @@ int main(int argc, char *argv[]){
         close(monitorPipe[1]);
         close(minerPipe[0]);
         if(miner(rounds, nthreads, target, monitorPipe[0], minerPipe[1]) == EXIT_FAILURE){
-            perror("Error executing the miner process");
+            perror("Error executing the miner process\n");
             exit(EXIT_FAILURE);
         } 
         exit(EXIT_SUCCESS);
@@ -88,7 +88,7 @@ int main(int argc, char *argv[]){
 
     monitorPID = fork();
     if (monitorPID < 0){
-        perror("Error creating the monitor process");
+        perror("Error creating the monitor process\n");
         close(monitorPipe[0]);
         close(monitorPipe[1]);
         close(minerPipe[0]);
@@ -100,7 +100,7 @@ int main(int argc, char *argv[]){
         close(monitorPipe[0]);
         close(minerPipe[1]);
         if(monitor(monitorPipe[1], minerPipe[0]) == EXIT_FAILURE){
-            perror("Error executing the monitor process");
+            perror("Error executing the monitor process\n");
             exit(EXIT_FAILURE);
         }
     }
@@ -111,22 +111,22 @@ int main(int argc, char *argv[]){
     close(minerPipe[1]);
 
     if(pthread_create(&minerThread, NULL, wait4miner, &minerPID)){
-        perror("Error creating the miner thread");
+        perror("Error creating the miner thread\n");
         exit(EXIT_FAILURE);
     }
 
     if(pthread_create(&monitorThread, NULL, wait4monitor, &monitorPID)){
-        perror("Error creating the monitor thread");
+        perror("Error creating the monitor thread\n");
         exit(EXIT_FAILURE);
     }
 
     if(pthread_join(minerThread, NULL)){
-        perror("Error joining the miner thread");
+        perror("Error joining the miner thread\n");
         exit(EXIT_FAILURE);
     }
 
     if(pthread_join(monitorThread, NULL)){
-        perror("Error joining the monitor thread");
+        perror("Error joining the monitor thread\n");
         exit(EXIT_FAILURE);
     }
 
@@ -160,10 +160,10 @@ void *wait4monitor(void *pid){
     int status;
     waitpid(*(int *)pid, &status, 0);
     if(WIFEXITED(status)){
-        printf("Monitor process finished with status %d \n", WEXITSTATUS(status));
+        printf("Monitor process finished with status %d\n", WEXITSTATUS(status));
     }
     else{
-        printf("Monitor process finished abnormally \n");
+        printf("Monitor process finished abnormally\n");
     }
     exit(EXIT_SUCCESS);
 }

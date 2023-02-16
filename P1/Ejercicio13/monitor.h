@@ -28,11 +28,11 @@
  * @brief in this function we will monitor the process
  *        and we will print the information of the process
  *        and check if the solution is correct.
- * @param Psince value since where we're start reading the pipe
- * @param Pwhere value of the pipe where we're writing
+ * @param monitorPipe value since where we're start reading the pipe
+ * @param minerPipe value of the pipe where we're writing
  * @return 0 ok, 1 error
  */
-int monitor (int Psince, int Pwhere);
+int monitor (int monitorPipe, int minerPipe);
 
 
 #endif
