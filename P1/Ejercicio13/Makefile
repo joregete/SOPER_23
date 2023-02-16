@@ -8,5 +8,5 @@ clean :
 mrush : miner.c monitor.c pow.c mrush.c
 	$(CC) $(CFLAGS) $^ -o $@
 
-val: mrush
+runv: mrush
 	valgrind --leak-check=full --show-leak-kinds=all -s ./mrush 0 5 3

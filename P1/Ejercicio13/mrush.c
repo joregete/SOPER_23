@@ -82,8 +82,7 @@ int main(int argc, char *argv[]){
         if(miner(rounds, nthreads, target, monitorPipe[0], minerPipe[1]) == EXIT_FAILURE){
             perror("Error executing the miner process\n");
             exit(EXIT_FAILURE);
-        } 
-        exit(EXIT_SUCCESS);
+        }
     }
 
     monitorPID = fork();
@@ -105,10 +104,10 @@ int main(int argc, char *argv[]){
         }
     }
 
-    close(monitorPipe[0]);
-    close(monitorPipe[1]);
     close(minerPipe[0]);
     close(minerPipe[1]);
+    close(monitorPipe[0]);
+    close(monitorPipe[1]);
 
     if(pthread_create(&minerThread, NULL, wait4miner, &minerPID)){
         perror("Error creating the miner thread\n");
@@ -129,8 +128,6 @@ int main(int argc, char *argv[]){
         perror("Error joining the monitor thread\n");
         exit(EXIT_FAILURE);
     }
-
-    exit(EXIT_SUCCESS);
 }
 
 /**
@@ -143,11 +140,12 @@ void *wait4miner(void *pid){
     int status;
     waitpid(*(int *)pid, &status, 0);
     if(WIFEXITED(status))
-        printf("Miner process finished with status %d \n", WEXITSTATUS(status));
+        printf("Miner process finished with status %d, %s\n", WEXITSTATUS(status), (status)? "FAILURE" : "SUCCESS");
     else
         printf("Miner process finished abnormally \n");
-    
-    exit(EXIT_SUCCESS);
+
+    return NULL;
+    // exit(EXIT_SUCCESS);
 }
 
 /**
@@ -159,11 +157,11 @@ void *wait4miner(void *pid){
 void *wait4monitor(void *pid){
     int status;
     waitpid(*(int *)pid, &status, 0);
-    if(WIFEXITED(status)){
-        printf("Monitor process finished with status %d\n", WEXITSTATUS(status));
-    }
-    else{
+    if(WIFEXITED(status))
+        printf("Monitor process finished with status %d, %s\n", WEXITSTATUS(status), (status)? "FAILURE" : "SUCCESS");
+    else
         printf("Monitor process finished abnormally\n");
-    }
-    exit(EXIT_SUCCESS);
+    
+    return NULL;
+    // exit(EXIT_SUCCESS);
 }
