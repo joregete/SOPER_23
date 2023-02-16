@@ -11,7 +11,13 @@ void wait4miner(void *pid);
 void wait4monitor(void *pid);
 
 
-
+/**
+ * @brief Main function for the miner rush
+ * 
+ * @param argc 
+ * @param argv 
+ * @return 0 Exit success or 1 Exit failure
+ */
 int main(int argc, char *argv[]){
     int minerPID, monitorPID, rounds, nthreads, target;;
     pthread_t minerThread, monitorThread;
@@ -99,14 +105,18 @@ int main(int argc, char *argv[]){
         perror("Error creating the monitor thread");
         exit(EXIT_FAILURE);
     }
+
     if(pthread_join(minerThread, NULL) != 0){
         perror("Error joining the miner thread");
         exit(EXIT_FAILURE);
     }
+
     if(pthread_join(monitorThread, NULL) != 0){
         perror("Error joining the monitor thread");
         exit(EXIT_FAILURE);
     }
+
+    exit(EXIT_SUCCESS);
 }
 
 /**
