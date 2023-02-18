@@ -8,11 +8,12 @@
 
 #include "miner.h"
 
-typedef struct _minerData {
-    int i;
+typedef struct _minerData { //todos los hilos comparten esta estructura
     long target;
     long solution;
-} MinerData;
+    volatile int i; //comunicar hilos, empieza a calcular desde la i del otro hilo
+    // volatile obliga a volver a mirar el valor de la variable antes de usarla, evitando que 2 hilos usen el mismo valor evitando el uso de semaforos
+    } MinerData;
 
 static MinerData minerData;
 
@@ -23,12 +24,14 @@ static MinerData minerData;
  * @return void* 
  */
 void *work(void* args){
-    int aux;
+    long aux;
     MinerData *minerData = (MinerData*) args;
     while(minerData->i < POW_LIMIT && minerData->solution == -1){
-        aux = minerData->i++;
+        aux = minerData->i;
+        minerData->i++;
         if(minerData->target == pow_hash(aux)){
             minerData->solution = aux;
+        // printf("AUX:%d\n",aux);
             return NULL;
         }
     }
@@ -70,7 +73,8 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
             }
         }
 
-        write(minerPipe, &minerData.target, sizeof(int)*2);
+        // printf("%ld"")
+        write(minerPipe, &minerData, sizeof(long)*2);
         read(monitorPipe, &resp, sizeof(char));
         if(!resp){
             printf("The solution has been invalidated\n");
