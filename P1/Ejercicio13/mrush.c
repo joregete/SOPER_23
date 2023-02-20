@@ -22,7 +22,7 @@ void *wait4monitor(void *pid);
 int main(int argc, char *argv[]){
     int minerPID, monitorPID, rounds, nthreads, target;;
     pthread_t minerThread, monitorThread;
-    int monitorPipe[2], minerPipe[2]; // monitorPipe: comunica monitor con miner; minerPipe: comunica miner con monitor
+    int monitorPipe[2], minerPipe[2]; // monitorPipe: comunicates monitor with miner; minerPipe: comunicates miner with monitor
     int pipeStatus;
 
     if (argc != 4){
@@ -52,7 +52,7 @@ int main(int argc, char *argv[]){
         exit(EXIT_FAILURE);
     }
 
-    pipeStatus = pipe(monitorPipe);
+    pipeStatus = pipe(monitorPipe);  // read in position 0 and write in position 1
     if(pipeStatus < 0){
         perror("Error creating miner pipe\n");
         exit(EXIT_FAILURE);
@@ -61,8 +61,8 @@ int main(int argc, char *argv[]){
     pipeStatus = pipe(minerPipe);
     if(pipeStatus < 0){
         perror("Error creating miner pipe\n");
-        close(monitorPipe[0]); //tengo que cerrar tanto [0] como [1]???
-        close(monitorPipe[1]); //o es suficiente con close(monitorPipe)?
+        close(monitorPipe[0]);
+        close(monitorPipe[1]);
         exit(EXIT_FAILURE);
     }
 
@@ -77,8 +77,8 @@ int main(int argc, char *argv[]){
     }
     
     if (minerPID == 0){
-        close(monitorPipe[1]);
-        close(minerPipe[0]);
+        close(monitorPipe[1]); //we close the write position of the monitor, we are not using it
+        close(minerPipe[0]); //we close the read position of the miner, we are not using it
         if(miner(rounds, nthreads, target, monitorPipe[0], minerPipe[1]) == EXIT_FAILURE){
             perror("Error executing the miner process\n");
             exit(EXIT_FAILURE);
@@ -96,8 +96,8 @@ int main(int argc, char *argv[]){
     }
     
     if (monitorPID == 0){
-        close(monitorPipe[0]);
-        close(minerPipe[1]);
+        close(monitorPipe[0]); // we close the read position of the monitor, we are not using it
+        close(minerPipe[1]); // we cose the write position of the miner, we are not using it
         if(monitor(monitorPipe[1], minerPipe[0]) == EXIT_FAILURE){
             perror("Error executing the monitor process\n");
             exit(EXIT_FAILURE);

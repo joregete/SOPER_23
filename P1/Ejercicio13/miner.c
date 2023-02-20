@@ -73,9 +73,8 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
             }
         }
 
-        // printf("%ld"")
-        write(minerPipe, &minerData, sizeof(long)*2);
-        read(monitorPipe, &resp, sizeof(char));
+        write(minerPipe, &minerData, sizeof(long)*2); //no hace falta poner minerData[0] ya que minerData es nuestra direccion y sizeof(long)*2 es el OFFSET
+        read(monitorPipe, &resp, sizeof(char)); //same here, pero es bloqueante
         if(!resp){
             printf("The solution has been invalidated\n");
             free(threads);
