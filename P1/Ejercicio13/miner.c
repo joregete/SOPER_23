@@ -52,10 +52,10 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
     }
     //minerData = (struct _minerData*) malloc(nthreads * sizeof(_minerData));
 
-    minerData.solution = target;
+    minerData.solution = target/nthreads;
     for(i = 0; rounds <= 0 || i < rounds; i++){
         minerData.i = 0;
-        minerData.target = minerData.solution;
+        minerData.target = minerData.solution/nthreads;
         minerData.solution = -1;
 
         for(j = 0; j < nthreads; j++){
