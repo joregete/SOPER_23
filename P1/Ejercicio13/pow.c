@@ -4,9 +4,7 @@
  * @brief Computation of the POW.
  * @version 1.5
  * @date 2023-02-02
- * 
  */
-
 #include "pow.h"
 
 #define PRIME POW_LIMIT

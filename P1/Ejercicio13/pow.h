@@ -6,12 +6,9 @@
  * @date 2023-02-02
  *
  * @copyright Copyright (c) 2022
- *
  */
-
 #ifndef _POW_H
 #define _POW_H
-
 #define POW_LIMIT 99997669 /*!< Maximum number for the hash result. */
 
 /**

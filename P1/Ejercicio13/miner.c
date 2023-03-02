@@ -21,7 +21,7 @@ typedef struct _minerData {
 
 static PipeData pipeData;
 
-int magicFlag = 0;  //status
+int magicFlag = 0;
 /**
  * @brief Private function that will execute the threads
  * 

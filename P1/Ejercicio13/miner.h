@@ -22,8 +22,6 @@
 #include "pow.h"
 #define MAX_MINERS 10
 
-
-
 /**
  * @brief Computes the POW
  * @author Enmanuel Abreu & Jorge Álvarez
