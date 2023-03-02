@@ -128,40 +128,42 @@ int main(int argc, char *argv[]){
         perror("Error joining the monitor thread\n");
         exit(EXIT_FAILURE);
     }
+    
+    exit(EXIT_SUCCESS);
 }
 
 /**
- * @brief Wait for the miner process to finish
+ * @brief Waits for the miner process to finish
  * 
  * @param pid pid of the miner process
  * @return void
  */
 void *wait4miner(void *pid){
     int status;
+
     waitpid(*(int *)pid, &status, 0);
     if(WIFEXITED(status))
         printf("Miner process finished with status %d, %s\n", WEXITSTATUS(status), (status)? "FAILURE" : "SUCCESS");
     else
         printf("Miner process finished abnormally \n");
 
-    return NULL;
-    // exit(EXIT_SUCCESS);
+    return 0;
 }
 
 /**
- * @brief Wait for the monitor process to finish
+ * @brief Waits for the monitor process to finish
  * 
  * @param pid pid of the monitor process
  * @return void
  */
 void *wait4monitor(void *pid){
     int status;
+
     waitpid(*(int *)pid, &status, 0);
     if(WIFEXITED(status))
         printf("Monitor process finished with status %d, %s\n", WEXITSTATUS(status), (status)? "FAILURE" : "SUCCESS");
     else
         printf("Monitor process finished abnormally\n");
     
-    return NULL;
-    // exit(EXIT_SUCCESS);
+    return 0;
 }

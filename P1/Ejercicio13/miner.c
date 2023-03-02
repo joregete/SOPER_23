@@ -8,17 +8,16 @@
 
 #include "miner.h"
 
-typedef struct _minerData { //todos los hilos comparten esta estructura
+typedef struct _minerData { 
     long target;
     long solution;
-    volatile int i; //comunicar hilos, empieza a calcular desde la i del otro hilo
-    // volatile obliga a volver a mirar el valor de la variable antes de usarla, evitando que 2 hilos usen el mismo valor evitando el uso de semaforos
-    } MinerData;
+    int i;
+} MinerData;
 
-static MinerData minerData;
+static MinerData minerData; //all threads share this structure
 
 /**
- * @brief Function that will execute the threads
+ * @brief Private function that will execute the threads
  * 
  * @param args 
  * @return void* 
@@ -50,7 +49,6 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
         close(minerPipe);
         exit(EXIT_FAILURE);
     }
-    //minerData = (struct _minerData*) malloc(nthreads * sizeof(_minerData));
 
     minerData.solution = target/nthreads;
     for(i = 0; rounds <= 0 || i < rounds; i++){
@@ -73,8 +71,8 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
             }
         }
 
-        write(minerPipe, &minerData, sizeof(long)*2); //no hace falta poner minerData[0] ya que minerData es nuestra direccion y sizeof(long)*2 es el OFFSET
-        read(monitorPipe, &resp, sizeof(char)); //same here, pero es bloqueante
+        write(minerPipe, &minerData, sizeof(long)*2); //minerData is our direction and sizeof(long)*2 is the OFFSET
+        read(monitorPipe, &resp, sizeof(char)); //same here, but its blocking
         if(!resp){
             printf("The solution has been invalidated\n");
             free(threads);

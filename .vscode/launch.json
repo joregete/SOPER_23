@@ -1,0 +1,31 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) Iniciar",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/enmanuel/Desktop/SOPER_23/SOPER_23/P1/Ejercicio13/mrush",
+            "args": ["1", "5", "1"],
+            "stopAtEntry": false,
+            "cwd": "/home/enmanuel/Desktop/SOPER_23/SOPER_23/P1/Ejercicio13",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true,
+                },
+                {   "description": "The new process is debugged after a fork. The parent process runs unimpeded.",
+                    "text": "-gdb-set follow-fork-mode parent",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}
