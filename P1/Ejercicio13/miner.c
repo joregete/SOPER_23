@@ -32,11 +32,10 @@ void *work(void* args){
     long i, result;
     MinerData *minerData = (MinerData*) args;
     for(i = minerData->start; i < minerData->end; i++){
-        if(magicFlag){
+        if(magicFlag)
             return NULL;
-        }
+        
         result = pow_hash(i);
-
         if(result == minerData->target){
             pipeData.solution = i;
             pipeData.target = result;
@@ -50,7 +49,7 @@ void *work(void* args){
 int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe){
     int i, j;
     pthread_t *threads;
-    char resp;
+    short resp;
     
     threads = (pthread_t*) malloc(nthreads * sizeof(pthread_t));
     if(threads == NULL){
@@ -85,16 +84,17 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
                 break;
             }
         }
-
         write(minerPipe, &pipeData, sizeof(long)*2); //minerData is our direction and sizeof(long)*2 is the OFFSET
-        read(monitorPipe, &resp, sizeof(char)); //same here, but its blocking
+        read(monitorPipe, &resp, sizeof(short)); //same here, but its blocking
+
+        target = pipeData.solution;
+        magicFlag = 0;
+        
         if(!resp){
             printf("The solution has been invalidated\n");
             free(threads);
             exit(EXIT_FAILURE);
         }
-        target = pipeData.solution;
-        magicFlag = 0;
     }
     
     free(threads);
