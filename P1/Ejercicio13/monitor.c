@@ -13,7 +13,6 @@ int monitor(int monitorPipe, int minerPipe){
     char respuesta;
     ssize_t nbytes;
     while((nbytes = read(minerPipe, &datos, sizeof(long)*2))){
-    // printf("%ld , %ld\n", datos[0], datos[1]);
         if (pow_hash(datos[1]) == datos[0]){
             respuesta = 1;
             printf("Solution accepted : %08ld --> %08ld\n", datos[0], datos[1]);

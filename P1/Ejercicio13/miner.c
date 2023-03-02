@@ -8,14 +8,20 @@
 
 #include "miner.h"
 
-typedef struct _minerData { 
+typedef struct _pipeData { 
     long target;
     long solution;
-    int i;
+} PipeData;
+
+typedef struct _minerData {
+    long start;
+    long end;
+    long target;
 } MinerData;
 
-static MinerData minerData; //all threads share this structure
+static PipeData pipeData;
 
+int magicFlag = 0;  //status
 /**
  * @brief Private function that will execute the threads
  * 
@@ -23,14 +29,18 @@ static MinerData minerData; //all threads share this structure
  * @return void* 
  */
 void *work(void* args){
-    long aux;
+    long i, result;
     MinerData *minerData = (MinerData*) args;
-    while(minerData->i < POW_LIMIT && minerData->solution == -1){
-        aux = minerData->i;
-        minerData->i++;
-        if(minerData->target == pow_hash(aux)){
-            minerData->solution = aux;
-        // printf("AUX:%d\n",aux);
+    for(i = minerData->start; i < minerData->end; i++){
+        if(magicFlag){
+            return NULL;
+        }
+        result = pow_hash(i);
+
+        if(result == minerData->target){
+            pipeData.solution = i;
+            pipeData.target = result;
+            magicFlag = 1;
             return NULL;
         }
     }
@@ -41,7 +51,7 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
     int i, j;
     pthread_t *threads;
     char resp;
-
+    
     threads = (pthread_t*) malloc(nthreads * sizeof(pthread_t));
     if(threads == NULL){
         perror("Error allocating memory for the threads");
@@ -50,19 +60,24 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
         exit(EXIT_FAILURE);
     }
 
-    minerData.solution = target/nthreads;
-    for(i = 0; rounds <= 0 || i < rounds; i++){
-        minerData.i = 0;
-        minerData.target = minerData.solution/nthreads;
-        minerData.solution = -1;
+    MinerData *minerData = malloc(sizeof(MinerData)*nthreads);
+    if(minerData == NULL){
+        perror("Error allocating memory for the minerData");
+        close(monitorPipe);
+        close(minerPipe);
+        exit(EXIT_FAILURE);
+    }
 
+    for(i = 0; rounds <= 0 || i < rounds; i++){
         for(j = 0; j < nthreads; j++){
-            if(pthread_create(&threads[j], NULL, work, &minerData)){
+            minerData[j].start = j * ((POW_LIMIT -1 ) / nthreads);
+            minerData[j].end = (j+1) * ((POW_LIMIT -1 ) / nthreads);
+            minerData[j].target = target;
+            if(pthread_create(&threads[j], NULL, work, &minerData[j])){
                 perror("pthread_create");
                 break;
             }
         }
-
         for(j = 0; j < nthreads; j++){
             if(pthread_join(threads[j], NULL)){
                 perror("pthread_join");
@@ -71,15 +86,19 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
             }
         }
 
-        write(minerPipe, &minerData, sizeof(long)*2); //minerData is our direction and sizeof(long)*2 is the OFFSET
+        write(minerPipe, &pipeData, sizeof(long)*2); //minerData is our direction and sizeof(long)*2 is the OFFSET
         read(monitorPipe, &resp, sizeof(char)); //same here, but its blocking
         if(!resp){
             printf("The solution has been invalidated\n");
             free(threads);
             exit(EXIT_FAILURE);
         }
+        target = pipeData.solution;
+        magicFlag = 0;
     }
     
     free(threads);
+    free(minerData);
+
     exit(EXIT_SUCCESS);
 }
