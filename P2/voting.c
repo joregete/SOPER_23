@@ -14,18 +14,18 @@
 #include <semaphore.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 
-#define SHM_NAME "/my_shm" // shared memory name
-#define SEM_NAME "/my_sem" // semaphore name
-#define FILENAME "pids.txt"
+#define FILEVOTES "txt/voting.txt"
+#define SEM_NAME "/calf_raise_sem"
 
-
-//GLOBAL VARIABLES
-int *pids; // shared memory
-sem_t *sem_id = NULL; // semaphore
-
+volatile sig_atomic_t sigusr1_received = 0; // 0 = false, 1 = true
+volatile sig_atomic_t sigusr2_received = 0; // 0 = false, 1 = true
+short responses = 0; // número de hijos que han respondido
+pid_t parent_pid = 0; // pid del padre
 
 /**
  * @brief versión segura de sem_wait que controla que no se interrumpa 
@@ -33,100 +33,74 @@ sem_t *sem_id = NULL; // semaphore
  */
 int _sem_wait_safe(sem_t *sem_id) {
   while (sem_wait(sem_id))
-    if (errno == EINTR) errno = 0;
-    else return -1;
+    if (errno == EINTR) 
+        errno = 0;
+    else 
+        return -1;
   return 0;
 }
 
 /**
- * @brief manda la señal SIGTERM a todos los procesos votantes
- * 
+ * @brief envia SIGTERM a todos los votante, espera a que terminen y libera los recursos del sistema
  */
-// void _sigalrm_sigint_handler(){
-//     short i = 0;
-//     pid_t pid = 0;
-//     FILE *fd = fopen("pids.txt", "r");
-
-//     while(fscanf(fd, "%ld\n", &pid) != EOF)
-//         kill(pid, SIGALRM);
-    
-//     fclose(fd);
-//     remove("pids.txt");
-// }
-
-// void _sigusr1_handler(){
-// }
-
-// void _sigterm_handler(){
-// }
-
-void handle_signal(int sig) {
-    switch(sig) {
-        case SIGALRM:
-            printf("Received SIGALRM\n");
-            // do something with SIGALRM
-            break;
-        case SIGINT:
-            printf("Received SIGINT\n");
-            // send SIGTERM to all Votante processes
-            kill(0, SIGTERM);
-            break;
-        case SIGUSR1:
-            printf("Received SIGUSR1\n");
-            // Cuando el sistema este listo, el proceso Principal enviará la señal SIGUSR1 a todos los procesos Votante
-
-            break;
-        case SIGTERM:
-            printf("Received SIGTERM\n");
-            // exit program
-            munmap(pids, sizeof(int));
-            if (shm_unlink(FILENAME) == -1) {
-                perror("shm_unlink");
-                exit(1);
-            }
-            printf("Finishing by signal\n");
-            exit(EXIT_SUCCESS);
-            break;
-        default:
-            break;
-    }
-    
-    // update pids.txt with current process ID
-    if (sem_wait(sem) == -1) { // decrement semaphore
-        perror("sem_wait");
-        exit(1);
-    }
-
-    FILE* fp = fopen(FILENAME, "a"); //append mode
-    if (fp == NULL) {
-        perror("fopen");
-        exit(1);
-    }
-    fprintf(fp, "%d\n", getpid());
-    fclose(fp);
-
-    if (sem_post(sem) == -1) { // increment semaphore
-        perror("sem_post");
-        exit(1);
-    }
+void _sigalrm_sigint_handler(){
+    kill(0, SIGTERM);
 }
 
 
-int votante(){
+//HANDLERS USADOS POR VOTANTES
+
+void _sigusr1_handler(){
+    sigusr1_received = 1;
+}
+
+void _sigusr2_handler(){
+    if(getpid() == parent_pid) // si es el padre
+        responses++;
+        return;
+    sigusr2_received = 1; // si es un hijo
+}
+
+void _sigterm_handler(){
+    printf("\n%d finishing by signal", getpid());
+    exit(0);
+}
+
+int votante(sem_t *sem, FILE *voting_file){
     // Cuando el proceso votante reciba la señal SIGUSR1, mostrar el mensaje "Voting"
     // Cuando el proceso votante reciba la señal SIGTERM, liberar los recursos del sistema 
     // y terminar su ejecucion mostrando el mensaje "Finishing by signal"
     sigset_t mask, oldmask;
 
-    /* Set up the mask of signals to temporarily block. */
+    // lo que nos recomendó Eduardo para esperar a SIGUSR1
     sigemptyset (&mask);
     sigaddset (&mask, SIGUSR1);
-
-    /* Wait for a signal to arrive. */
     sigprocmask (SIG_BLOCK, &mask, &oldmask);
-    while (!usr_interrupt)
-    sigsuspend (&oldmask);
+    while (!sigusr1_received)
+        sigsuspend (&oldmask);
     sigprocmask (SIG_UNBLOCK, &mask, NULL);
+
+    // comprobar si éste es el primer proceso que llega
+    if(!sigusr2_received){
+        kill(0, SIGUSR2); // éste proceso es el Candidato, avisa a los demás
+        // esperar en el semáforo
+        _sem_wait_safe(sem);
+
+        fprintf(voting_file, "%d\n", getpid());
+
+        // liberar el semáforo
+        sem_post(sem);
+    }
+    else{ // éste proceso es un votante
+        // esperar en el semáforo
+        _sem_wait_safe(sem);
+
+        char response = (rand() % 2) ? 'Y' : 'N';
+        fprintf(voting_file, "%c\n", response);
+
+        // liberar el semáforo
+        sem_post(sem);
+    }
 }
 
 /**
@@ -135,107 +109,91 @@ int votante(){
  * @param t tiempo de votación
  */
 int main(int argc, char * argv[]){
-    // short i = 0;
-    // pid_t pids[n], pid = 0;
-    FILE *fd = NULL;
-    int shm_fd, nprocs = 0, nsecs = 0;
+    FILE *voting_file;
+    int shm_fd, nprocs = 0, nsecs = 0, i = 0, votes = 0;
+    char output[100] = "Candidate", vote;
+    pid_t pid = 0;
+    sem_t *sem;
     
-
     if (argc != 3){
-        printf("Usage: %s <N_PROCS> <N_SECS>\n <N_PROCS> es el número de procesos
-                que participarán en la votación y\n <N_SECS> es el número máximo 
-                de segundos que estará activo el sistema\n", argv[0]);
-        return 1;
+        printf("Error: Invalid number of arguments.\n");
+        return EXIT_FAILURE;
     }
 
-    if(nprocs = atoi(agv[1]) <= 0){
+    nprocs = atoi(argv[1]);
+    if(nprocs <= 0){
         printf("Error: N_PROCS must be a positive integer.\n");
-        return 1;
+        return EXIT_FAILURE;
     }
 
-    if(nsecs = atoi(agv[2]) <= 0){
+    nsecs = atoi(argv[2]);
+    if(nsecs <= 0){
         printf("Error: N_SECS must be a positive integer.\n");
-        return 1;
+        return EXIT_FAILURE;
     }
 
-  // create shared memory segment
-    shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
-    if (shm_fd == -1) {
-        perror("shm_open");
-        exit(1);
+    // crear semaforo
+    sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 1);
+    if (sem == SEM_FAILED)
+        return EXIT_FAILURE;
+    
+
+    parent_pid = getpid(); // guardar el pid del padre
+
+    voting_file = fopen(FILEVOTES, "w");
+    if(voting_file == NULL){
+        sem_close(sem);
+        sem_unlink(SEM_NAME);
+        return EXIT_FAILURE;
     }
 
-    if (ftruncate(shm_fd, sizeof(int)) == -1) {
-        perror("ftruncate");
-        exit(1);
-    }
-    
-    // attach shared memory segment
-    pids = (int*) mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (pids == MAP_FAILED) {
-        perror("mmap");
-        exit(EXIT_FAILURE);
-    }
-    
-    // set initial value in shared memory
-    *pids = getpid();
-    
-    // create semaphore
-    sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
-    if (sem == SEM_FAILED) {
-        perror("sem_open");
-        exit(EXIT_FAILURE);
-    }
-    
-    // register signal handlers
-    if (signal(SIGALRM, handle_signal) == SIG_ERR) {
-        perror("signal SIGALRM");
-        exit(EXIT_FAILURE);
-    }
-    if (signal(SIGINT, handle_signal) == SIG_ERR) {
-        perror("signal SIGINT");
-        exit(EXIT_FAILURE);
-    }
-    if (signal(SIGUSR1, handle_signal) == SIG_ERR) {
-        perror("signal SIGUSR1");
-        exit(EXIT_FAILURE);
-    }
-    if (signal(SIGTERM, handle_signal) == SIG_ERR) {
-        perror("signal SIGTERM");
-        exit(EXIT_FAILURE);
-    }
-
-    sem_id = sem_open("sem", O_CREAT, 0644, 1);
-    if (sem_id == SEM_FAILED) {
-        perror("sem_open");
-        exit(EXIT_FAILURE);
-    }
-
-    // fijar una alarma para dentro de t segundos
-    alarm(t); //no sé que coño hace esto xd
-    
-    if(fd == NULL){
-        fprintf(stdout, "ERROR: principal() falló abriendo 'pids.txt'.\n");
-        exit(EXIT_FAILURE);
-    }
     // Crear n procesos votantes
-    for(i=0;i<n;i++) {
-        if(fork() == 0){
-            // Almacenar los pids hijos en un fichero
-            pid = getpid();
-            fprintf(fd, "%d\n", pid);
-            pids[i] = pid;
-            votante();
+    for(i=0;i<nprocs;i++) {
+        pid = fork();
+        if(pid == 0){ // proceso hijo
+            signal(SIGINT, SIG_IGN);
+            signal(SIGUSR1, _sigusr1_handler);
+            signal(SIGUSR2, _sigusr2_handler);
+            signal(SIGTERM, _sigterm_handler);
+            votante(sem, voting_file);
         }
     }
+    alarm(nsecs);
+    signal(SIGUSR1, SIG_IGN); // ignorar SIGUSR1 para que kill(0, SIGUSR1) no se envíe a sí mismo
+    signal(SIGTERM, SIG_IGN); // ignorar SIGTERM para que kill(0, SIGTERM) no se envíe a sí mismo
+    signal(SIGALRM, _sigalrm_sigint_handler); // capturar SIGALRM
+    signal(SIGINT, _sigalrm_sigint_handler); // capturar SIGINT
+    signal(SIGUSR2, _sigusr2_handler); // capturar SIGUSR2 
+
     // enviar la señal SIGUSR1 a todos los procesos votantes
-    for(i = 0; i < n; i++){
-        kill(pids[i], SIGUSR1);
+    kill(0, SIGUSR1);
+
+    // esperar a que todos los procesos votantes terminen
+    while(responses < nprocs)
+        sleep(1);
+
+    fscanf(voting_file, "%d", &pid);
+    sprintf(output, " %d", pid);
+    strcat(output, " => [ ");
+    while(fscanf(voting_file, "%c\n", &vote) != EOF){
+        if(vote == 'Y'){
+            strcat(output, "Y ");
+            votes++;
+        }
+        else{
+            strcat(output, "N ");
+            votes--;
+        }
     }
-    // en cuanto se reciba SIGINT o SIGALRM, hay que enviar SIGTERM
-    // a todos los votante, esperar que terminen 
-    for(i = 0; i < n; i++){
-        wait(NULL);
-    }
-    // y liberar los recursos del sistema
+
+    strcat(output, "]");
+    votes > 0 ? strcat(output, " => Accepted\n") : strcat(output, " => Rejected\n");
+
+    printf("%s", output);
+
+    sem_close(sem);
+    sem_unlink(SEM_NAME);
+    fclose(voting_file);
+
+    return 0;
 }
