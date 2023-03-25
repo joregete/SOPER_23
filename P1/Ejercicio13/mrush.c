@@ -157,13 +157,16 @@ void *wait4miner(void *pid){
  * @return void
  */
 void *wait4monitor(void *pid){
-    int status;
+    int status, waitpidStatus;
 
-    waitpid(*(int *)pid, &status, 0);
+    waitpidStatus = waitpid(*(int *)pid, &status, 0);
+    // printf("waitpidStatus: %d\n", waitpidStatus);
     if(WIFEXITED(status))
         printf("Monitor process finished with status %d, %s\n", WEXITSTATUS(status), (status)? "FAILURE" : "SUCCESS");
-    else
+    else{
         printf("Monitor process finished abnormally\n");
+        // printf("Status: %d\n", status);
+    }
     
     return 0;
 }

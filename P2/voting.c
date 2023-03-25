@@ -24,12 +24,12 @@
 
 volatile sig_atomic_t sigusr1_received = 0; // 0 = false, 1 = true
 volatile sig_atomic_t sigusr2_received = 0; // 0 = false, 1 = true
-short responses = 0; // número de hijos que han respondido
-pid_t parent_pid = 0; // pid del padre
+short responses = 0; // number of children that have responded
+pid_t parent_pid = 0; // pid of the parent
+FILE* voting_file = NULL;
 
 /**
- * @brief versión segura de sem_wait que controla que no se interrumpa 
- * la ejecución por una señal
+ * @brief safe version of sem_wait that controls that execution is not interrupted by a signal
  */
 int _sem_wait_safe(sem_t *sem_id) {
   while (sem_wait(sem_id))
@@ -41,38 +41,44 @@ int _sem_wait_safe(sem_t *sem_id) {
 }
 
 /**
- * @brief envia SIGTERM a todos los votante, espera a que terminen y libera los recursos del sistema
+ * @brief sends SIGTERM to all voters, waits for them to finish and releases system resources
  */
-void _sigalrm_sigint_handler(){
+void _sigalrm_sigint_handler(int sig){
+    if(sig == SIGALRM)
+        printf("\nfinishing by alarm");
+    if(sig == SIGINT)
+        printf("\nfinishing by signal");
+
     kill(0, SIGTERM);
 }
 
 
-//HANDLERS USADOS POR VOTANTES
+//HANDLERS USED BY VOTERS
 
 void _sigusr1_handler(){
     sigusr1_received = 1;
 }
 
 void _sigusr2_handler(){
-    if(getpid() == parent_pid) // si es el padre
+    if(getpid() == parent_pid){ // if it's the parent
         responses++;
         return;
-    sigusr2_received = 1; // si es un hijo
+    }
+    sigusr2_received = 1; // if it's a child
 }
 
 void _sigterm_handler(){
-    printf("\n%d finishing by signal", getpid());
+    fclose(voting_file); // each child must close its file stream
     exit(0);
 }
 
-int votante(sem_t *sem, FILE *voting_file){
-    // Cuando el proceso votante reciba la señal SIGUSR1, mostrar el mensaje "Voting"
-    // Cuando el proceso votante reciba la señal SIGTERM, liberar los recursos del sistema 
-    // y terminar su ejecucion mostrando el mensaje "Finishing by signal"
+int votante(sem_t *sem){
+    // When the voter process receives the SIGUSR1 signal, show the message "Voting"
+    // When the voter process receives the SIGTERM signal, release system resources 
+    // and end its execution showing the message "Finishing by signal"
     sigset_t mask, oldmask;
 
-    // lo que nos recomendó Eduardo para esperar a SIGUSR1
+    // what Eduardo recommended us to wait for SIGUSR1
     sigemptyset (&mask);
     sigaddset (&mask, SIGUSR1);
     sigprocmask (SIG_BLOCK, &mask, &oldmask);
@@ -80,37 +86,49 @@ int votante(sem_t *sem, FILE *voting_file){
         sigsuspend (&oldmask);
     sigprocmask (SIG_UNBLOCK, &mask, NULL);
 
-    // comprobar si éste es el primer proceso que llega
+    // check if this is the first process to arrive
     if(!sigusr2_received){
-        kill(0, SIGUSR2); // éste proceso es el Candidato, avisa a los demás
-        // esperar en el semáforo
-        _sem_wait_safe(sem);
-
+        kill(0, SIGUSR2); // this process is the Candidate, notify the others
+        // wait on semaphore
+       if(_sem_wait_safe(sem) == -1){
+            printf("Error: sem_wait failed.\n");
+            exit(EXIT_FAILURE);
+        }
+        
+        fprintf(stdout, "%d es el candidato!!! FeelsGoodMan\n", getpid()); // ELIMINAR MAS TARDE
+        fflush(stdout);
         fprintf(voting_file, "%d\n", getpid());
 
-        // liberar el semáforo
+        // release semaphore
         sem_post(sem);
     }
-    else{ // éste proceso es un votante
-        // esperar en el semáforo
-        _sem_wait_safe(sem);
+    else{ // this process is a voter
+        // wait on semaphore
+        if(_sem_wait_safe(sem) == -1){
+            printf("Error: sem_wait failed.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        fprintf(stdout, "%d es votante Sadge\n", getpid()); // ELIMINAR MAS TARDE
+        fflush(stdout);
+
 
         char response = (rand() % 2) ? 'Y' : 'N';
         fprintf(voting_file, "%c\n", response);
 
-        // liberar el semáforo
+        // release semaphore
         sem_post(sem);
     }
+    return 0;
 }
 
 /**
- * @brief crea los procesos votantes...
- * @param n número de procesos votantes
- * @param t tiempo de votación
+ * @brief creates the voter processes...
+ * @param n number of voter processes
+ * @param t voting time
  */
 int main(int argc, char * argv[]){
-    FILE *voting_file;
-    int shm_fd, nprocs = 0, nsecs = 0, i = 0, votes = 0;
+    int nprocs = 0, nsecs = 0, votes = 0, i;
     char output[100] = "Candidate", vote;
     pid_t pid = 0;
     sem_t *sem;
@@ -132,14 +150,15 @@ int main(int argc, char * argv[]){
         return EXIT_FAILURE;
     }
 
-    // crear semaforo
+    // create semaphore
     sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 1);
     if (sem == SEM_FAILED)
         return EXIT_FAILURE;
     
 
-    parent_pid = getpid(); // guardar el pid del padre
+    parent_pid = getpid(); // save the parent's pid
 
+    // have the file already opened for the children
     voting_file = fopen(FILEVOTES, "w");
     if(voting_file == NULL){
         sem_close(sem);
@@ -147,28 +166,37 @@ int main(int argc, char * argv[]){
         return EXIT_FAILURE;
     }
 
-    // Crear n procesos votantes
+    // Create n voter processes
     for(i=0;i<nprocs;i++) {
         pid = fork();
-        if(pid == 0){ // proceso hijo
+        if(pid == 0){ // child process
             signal(SIGINT, SIG_IGN);
             signal(SIGUSR1, _sigusr1_handler);
             signal(SIGUSR2, _sigusr2_handler);
             signal(SIGTERM, _sigterm_handler);
-            votante(sem, voting_file);
+            fprintf(stdout, "%d declaró sus manejadores. WideBoris\n", getpid()); // ELIMINAR MAS TARDE
+            fflush(stdout);
+            votante(sem);
         }
     }
+    sleep(0.5); // give children some time to declare handlers
     alarm(nsecs);
-    signal(SIGUSR1, SIG_IGN); // ignorar SIGUSR1 para que kill(0, SIGUSR1) no se envíe a sí mismo
-    signal(SIGTERM, SIG_IGN); // ignorar SIGTERM para que kill(0, SIGTERM) no se envíe a sí mismo
-    signal(SIGALRM, _sigalrm_sigint_handler); // capturar SIGALRM
-    signal(SIGINT, _sigalrm_sigint_handler); // capturar SIGINT
-    signal(SIGUSR2, _sigusr2_handler); // capturar SIGUSR2 
+    signal(SIGUSR1, SIG_IGN); // ignore SIGUSR1 so that kill(0, SIGUSR1) is not sent to itself
+    signal(SIGTERM, SIG_IGN); // ignore SIGTERM so that kill(0, SIGTERM) is not sent to itself
+    signal(SIGALRM, _sigalrm_sigint_handler); // capture SIGALRM
+    signal(SIGINT, _sigalrm_sigint_handler); // capture SIGINT
+    signal(SIGUSR2, _sigusr2_handler); // capture SIGUSR2
+    fprintf(stdout, "Progenitor declaró sus manejadores. WideBorpaSpin\n", getpid()); // ELIMINAR MAS TARDE
+    fflush(stdout);
 
-    // enviar la señal SIGUSR1 a todos los procesos votantes
+
+
+    // send the SIGUSR1 signal to all voter processes
+    fprintf(stdout, "Mandando SIGUSR1 a todos los hijos... PauseChamp\n"); // ELIMINAR MAS TARDE
+    fflush(stdout);
     kill(0, SIGUSR1);
 
-    // esperar a que todos los procesos votantes terminen
+    // wait for all voter processes to finish
     while(responses < nprocs)
         sleep(1);
 
@@ -188,8 +216,10 @@ int main(int argc, char * argv[]){
 
     strcat(output, "]");
     votes > 0 ? strcat(output, " => Accepted\n") : strcat(output, " => Rejected\n");
-
     printf("%s", output);
+
+    for(i=0; i < nprocs; i++)
+        wait(NULL);
 
     sem_close(sem);
     sem_unlink(SEM_NAME);

@@ -50,6 +50,7 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
     int i, j;
     pthread_t *threads;
     short resp;
+    ssize_t nbytes;
     
     threads = (pthread_t*) malloc(nthreads * sizeof(pthread_t));
     if(threads == NULL){
@@ -83,9 +84,23 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
                 free(threads);
                 break;
             }
+        } //TODO: controlar el retorno de write y read con ERRNO
+
+        nbytes = write(minerPipe, &pipeData, sizeof(long)*2); //minerData is our direction and sizeof(long)*2 is the OFFSET
+        if(nbytes < 0){
+            perror("Error WRITING to the pipe in the miner");
+            free(threads);
+            exit(EXIT_FAILURE);
         }
-        write(minerPipe, &pipeData, sizeof(long)*2); //minerData is our direction and sizeof(long)*2 is the OFFSET
-        read(monitorPipe, &resp, sizeof(short)); //same here, but its blocking
+        nbytes = 0;
+        do{
+            nbytes = read(monitorPipe, &resp, sizeof(short)); //same here, but its blocking
+            if(nbytes < 0){
+                perror("Error READING from the pipe in the miner");
+                free(threads);
+                exit(EXIT_FAILURE);
+            }    
+        } while(nbytes < sizeof(short));
 
         target = pipeData.solution;
         magicFlag = 0;
@@ -96,7 +111,6 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
             exit(EXIT_FAILURE);
         }
     }
-    
     free(threads);
     free(minerData);
 
