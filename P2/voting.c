@@ -22,8 +22,10 @@
 #define FILEVOTES "txt/voting.txt"
 #define SEM_NAME "/calf_raise_sem"
 
+// ---------------------------- GLOBAL VARIABLES ----------------------------
 volatile sig_atomic_t sigusr1_received = 0; // 0 = false, 1 = true
 volatile sig_atomic_t sigusr2_received = 0; // 0 = false, 1 = true
+volatile sig_atomic_t sigalrm_pending = 0; // 0 = false, 1 = true
 short responses = 0; // number of children that have responded
 pid_t parent_pid = 0; // pid of the parent
 FILE* voting_file = NULL;
@@ -49,9 +51,14 @@ void _sigalrm_sigint_handler(int sig){
     if(sig == SIGINT)
         printf("\nfinishing by signal");
 
+    fclose(voting_file); // close the voting file
     kill(0, SIGTERM);
 }
 
+// handler for SIGALRM
+void _sigalrm_handler(int sig){
+    sigalrm_pending = 1;
+}
 
 //HANDLERS USED BY VOTERS
 
@@ -152,8 +159,12 @@ int main(int argc, char * argv[]){
 
     // create semaphore
     sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 1);
-    if (sem == SEM_FAILED)
+    if (sem == SEM_FAILED) {
+        sem_close(sem);
+        sem_unlink(SEM_NAME);
+        perror("sem_open");
         return EXIT_FAILURE;
+}
     
 
     parent_pid = getpid(); // save the parent's pid
@@ -176,6 +187,8 @@ int main(int argc, char * argv[]){
             signal(SIGTERM, _sigterm_handler);
             fprintf(stdout, "%d declaró sus manejadores. WideBoris\n", getpid()); // ELIMINAR MAS TARDE
             fflush(stdout);
+            // signal parent when done setting up
+            kill(parent_pid, SIGUSR1);
             votante(sem);
         }
     }
@@ -186,7 +199,7 @@ int main(int argc, char * argv[]){
     signal(SIGALRM, _sigalrm_sigint_handler); // capture SIGALRM
     signal(SIGINT, _sigalrm_sigint_handler); // capture SIGINT
     signal(SIGUSR2, _sigusr2_handler); // capture SIGUSR2
-    fprintf(stdout, "Progenitor declaró sus manejadores. WideBorpaSpin\n", getpid()); // ELIMINAR MAS TARDE
+    fprintf(stdout, "Progenitor %d declaró sus manejadores. WideBorpaSpin\n", getpid()); // ELIMINAR MAS TARDE
     fflush(stdout);
 
 
