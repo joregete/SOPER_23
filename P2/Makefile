@@ -11,3 +11,6 @@ voting : voting.c
 
 runv: voting
 	valgrind --leak-check=full --show-leak-kinds=all --trace-children=yes --track-origins=yes -s ./voting 2 2
+
+run: voting
+	./voting 2 2

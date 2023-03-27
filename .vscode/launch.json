@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "/home/jojje/Desktop/Universidad/SOPER_23/P2/voting",
-            "args": ["1", "5"],
+            "args": ["4", "5"],
             "stopAtEntry": false,
             "cwd": "/home/jojje/Desktop/Universidad/SOPER_23/P2/",
             "environment": [],
