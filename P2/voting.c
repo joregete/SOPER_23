@@ -197,7 +197,8 @@ int main(int argc, char * argv[]){
             pids[i] = pid;
         }
     }
-    sleep(0.25); // give children some time to declare handlers
+    // sleep(0.25); // give children some time to declare handlers
+    usleep(250000);
     signal(SIGALRM, _sigalrm_handler); // capture SIGALRM
     signal(SIGINT, _sigint_handler); // capture SIGINT
     signal(SIGUSR2, _sigusr2_handler); // capture SIGUSR2
@@ -207,6 +208,9 @@ int main(int argc, char * argv[]){
     fflush(stdout);
 
     while(1){
+        if (sigusr1_received || responses >= nprocs)
+            break;
+        
         // send the SIGUSR1 signal to all voter processes
         fprintf(stdout, "Mandando SIGUSR1 a todos los hijos... PauseChamp\n"); // ELIMINAR MAS TARDE
         fflush(stdout);
