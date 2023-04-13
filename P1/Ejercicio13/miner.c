@@ -58,11 +58,12 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
         close(monitorPipe);
         close(minerPipe);
         exit(EXIT_FAILURE);
-    }
+    }   
 
     MinerData *minerData = malloc(sizeof(MinerData)*nthreads);
     if(minerData == NULL){
         perror("Error allocating memory for the minerData");
+        free(threads);
         close(monitorPipe);
         close(minerPipe);
         exit(EXIT_FAILURE);
@@ -75,44 +76,52 @@ int miner(int rounds, int nthreads, long target, int monitorPipe, int minerPipe)
             minerData[j].target = target;
             if(pthread_create(&threads[j], NULL, work, &minerData[j])){
                 perror("pthread_create");
-                break;
+                free(minerData);
+                free(threads);
+                close(monitorPipe);
+                close(minerPipe);
+                exit(EXIT_FAILURE);
             }
         }
         for(j = 0; j < nthreads; j++){
             if(pthread_join(threads[j], NULL)){
                 perror("pthread_join");
-                free(threads);
+                    free(minerData);
+                    free(threads); 
+                    close(monitorPipe);
+                    close(minerPipe);
+                    exit(EXIT_FAILURE);
                 break;
             }
         } //TODO: controlar el retorno de write y read con ERRNO
 
-        nbytes = write(minerPipe, &pipeData, sizeof(long)*2); //minerData is our direction and sizeof(long)*2 is the OFFSET
-        if(nbytes < 0){
-            perror("Error WRITING to the pipe in the miner");
-            free(threads);
-            exit(EXIT_FAILURE);
-        }
-        nbytes = 0;
         do{
+            nbytes = write(minerPipe, &pipeData, sizeof(long)*2); //minerData is our direction and sizeof(long)*2 is the OFFSET
+            if(nbytes < 0){
+                perror("Error WRITING to the pipe in the miner");
+                exit(EXIT_FAILURE);
+            }
+            nbytes = 0;
             nbytes = read(monitorPipe, &resp, sizeof(short)); //same here, but its blocking
             if(nbytes < 0){
                 perror("Error READING from the pipe in the miner");
+                exit(EXIT_FAILURE);
+            }
+                    
+            if(!resp){
+                printf("The solution has been invalidated\n");
+                free(minerData);
                 free(threads);
                 exit(EXIT_FAILURE);
-            }    
+            }
         } while(nbytes < sizeof(short));
 
         target = pipeData.solution;
         magicFlag = 0;
-        
-        if(!resp){
-            printf("The solution has been invalidated\n");
-            free(threads);
-            exit(EXIT_FAILURE);
-        }
+
     }
-    free(threads);
     free(minerData);
+    free(threads);
 
     exit(EXIT_SUCCESS);
 }

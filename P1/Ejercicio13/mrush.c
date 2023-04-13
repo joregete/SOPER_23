@@ -11,7 +11,6 @@
 void *wait4miner(void *pid);
 void *wait4monitor(void *pid);
 
-
 /**
  * @brief Main function for the miner rush
  * 
@@ -47,10 +46,6 @@ int main(int argc, char *argv[]){
         fprintf(stderr, "The amount of miners(threads) have to be greater than 0\n");
         exit(EXIT_FAILURE);
     }
-    if (nthreads > MAX_MINERS){
-        fprintf(stderr, "MAX_MINERS have to be smaller than %d\n", MAX_MINERS);
-        exit(EXIT_FAILURE);
-    }
 
     pipeStatus = pipe(monitorPipe);  // read in position 0 and write in position 1
     if(pipeStatus < 0){
@@ -83,6 +78,8 @@ int main(int argc, char *argv[]){
             perror("Error executing the miner process\n");
             exit(EXIT_FAILURE);
         }
+        close(monitorPipe[0]);
+        close(minerPipe[1]);
     }
 
     monitorPID = fork();
@@ -94,6 +91,7 @@ int main(int argc, char *argv[]){
         close(minerPipe[1]);
         exit(EXIT_FAILURE);
     }
+
     
     if (monitorPID == 0){
         close(monitorPipe[0]); // we close the read position of the monitor, we are not using it
@@ -102,6 +100,8 @@ int main(int argc, char *argv[]){
             perror("Error executing the monitor process\n");
             exit(EXIT_FAILURE);
         }
+        close(monitorPipe[1]); 
+        close(minerPipe[0]);
     }
 
     close(minerPipe[0]);
@@ -128,7 +128,7 @@ int main(int argc, char *argv[]){
         perror("Error joining the monitor thread\n");
         exit(EXIT_FAILURE);
     }
-    
+
     exit(EXIT_SUCCESS);
 }
 
@@ -139,9 +139,14 @@ int main(int argc, char *argv[]){
  * @return void
  */
 void *wait4miner(void *pid){
-    int status;
-
-    waitpid(*(int *)pid, &status, 0);
+    int status, ret;
+    pid_t minerPID = *(pid_t*)pid;
+    
+    ret = waitpid(minerPID, &status, 0);
+    if (ret == -1) {
+        perror("waitpid for miner failed");
+        exit(EXIT_FAILURE);
+    }
     if(WIFEXITED(status))
         printf("Miner process finished with status %d, %s\n", WEXITSTATUS(status), (status)? "FAILURE" : "SUCCESS");
     else
@@ -157,15 +162,18 @@ void *wait4miner(void *pid){
  * @return void
  */
 void *wait4monitor(void *pid){
-    int status, waitpidStatus;
-
-    waitpidStatus = waitpid(*(int *)pid, &status, 0);
-    // printf("waitpidStatus: %d\n", waitpidStatus);
+    int status, ret;
+    pid_t minerPID = *(pid_t*)pid;
+    
+    ret = waitpid(minerPID, &status, 0);
+    if (ret == -1) {
+        perror("waitpid for monitor failed");
+        exit(EXIT_FAILURE);
+    }
     if(WIFEXITED(status))
         printf("Monitor process finished with status %d, %s\n", WEXITSTATUS(status), (status)? "FAILURE" : "SUCCESS");
     else{
         printf("Monitor process finished abnormally\n");
-        // printf("Status: %d\n", status);
     }
     
     return 0;
