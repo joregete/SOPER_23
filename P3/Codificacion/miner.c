@@ -1,16 +1,23 @@
 /**
-    * @file miner.c
-    * @brief Miner process
-    * @author Enmanuel, Jorge
-    * @version 0.1
-    * @date 2023-04-14
-    *
+* @file miner.c
+* @brief Miner process
+* @author Enmanuel, Jorge
+* @version 0.1
+* @date 2023-04-14
+*
 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include "common.h"
 #include "pow.h"
 
+/**
+ * @brief Miner process
+ * @param argv[1] = rounds (int), number of rounds to mine
+ * @param argv[2] = lag (int), time to wait between each message
+ * @return 0 on success, -1 on failure
+*/
 int main(int argc, char *argv[]){
     MESSAGE msg;
     struct mq_attr attr;
@@ -44,6 +51,7 @@ int main(int argc, char *argv[]){
         sleep(lag);
         msg.target = msg.solution;
     }
+
     fprintf(stdout, "\nfinishing...\n");
     msg.solution = -1;
     msg.target = -1;
@@ -52,6 +60,7 @@ int main(int argc, char *argv[]){
         mq_unlink(MQ_NAME);
         exit(EXIT_FAILURE);
     }
+
     mq_close(mq);
     mq_unlink(MQ_NAME);
     exit(EXIT_SUCCESS);
