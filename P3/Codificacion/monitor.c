@@ -10,7 +10,9 @@
 #include <string.h>
 #include <sys/shm.h>
 #include <sys/mman.h>
+#include <semaphore.h>
 #include "common.h"
+
 
 /* ----------------------------------------- GLOBALS ---------------------------------------- */
 
@@ -61,7 +63,7 @@ void comprobador(int lag){
     //open shared memory
     if((fd_shm = shm_open(SHM_NAME, O_RDONLY, 0)) == -1){
         perror("shm_open");
-        close_unlink()
+        close_unlink();
         exit(EXIT_FAILURE);
     }
 
@@ -69,7 +71,7 @@ void comprobador(int lag){
     if(ftruncate(fd_shm, sizeof(Block)) == -1){
         perror("ftruncate");
         shm_unlink(SHM_NAME);
-        close_unlink()
+        close_unlink();
         exit(EXIT_FAILURE);
     }
 
@@ -88,7 +90,7 @@ void comprobador(int lag){
     if((mq = mq_open(MQ_NAME, O_CREAT | O_RDONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
         close(fd_shm);
         shm_unlink(SHM_NAME);
-        close_unlink()
+        close_unlink();
         exit(EXIT_FAILURE);
     }
 
@@ -100,7 +102,7 @@ void comprobador(int lag){
             perror("mq_receive");
             close(fd_shm);
             shm_unlink(SHM_NAME);
-            close_unlink()
+            close_unlink();
             exit(EXIT_FAILURE);
         }
         if(msg.target == -1){
@@ -112,7 +114,7 @@ void comprobador(int lag){
             mq_close(mq);
             close(fd_shm);
             shm_unlink(SHM_NAME);
-            close_unlink()
+            close_unlink();
             exit(EXIT_SUCCESS);
         }
 
@@ -148,7 +150,7 @@ void monitor(int fd_shm, int lag){
     if(block == MAP_FAILED){
         perror("mmap");
         shm_unlink(SHM_NAME);
-        close_unlink()
+        close_unlink();
         close(fd_shm);
         exit(EXIT_FAILURE);
     }
@@ -159,7 +161,7 @@ void monitor(int fd_shm, int lag){
             fprintf(stdout, "\nfinishing...\n");
             close(fd_shm);
             shm_unlink(SHM_NAME);
-            close_unlink()
+            close_unlink();
             exit(EXIT_SUCCESS);
         }
         if(block->flag == 1)
@@ -182,23 +184,32 @@ int main(int argc, char *argv[]){
 
     lag = atoi(argv[1]);
 
-    if(gym_mutex == sem_open(MUTEX, O_CREAT, S_IRUSR | S_IWUSR, 1) == SEM_FAILED){
-        perror("sem_open");
-        exit(EXIT_FAILURE);
-    }
-    if(gym_empty == sem_open(EMPTY, O_CREAT, S_IRUSR | S_IWUSR, 1) == SEM_FAILED){
-        perror("sem_open");
-        sem_close(gym_mutex);
-        sem_unlink(MUTEX);
-        exit(EXIT_FAILURE);
-    }
-    if(gym_fill == sem_open(FILL, O_CREAT, S_IRUSR | S_IWUSR, 1) == SEM_FAILED){
+    gym_mutex = sem_open(MUTEX, O_CREAT, S_IRUSR | S_IWUSR, 1);
+    if (gym_mutex == SEM_FAILED){
         perror("sem_open");
         sem_close(gym_mutex);
         sem_unlink(MUTEX);
         sem_close(gym_empty);
         sem_unlink(EMPTY);
         exit(EXIT_FAILURE);
+    }
+    gym_empty = sem_open(EMPTY, O_CREAT, S_IRUSR | S_IWUSR, 1);
+    if (gym_empty == SEM_FAILED){
+        perror("sem_open");
+        sem_close(gym_mutex);
+        sem_unlink(MUTEX);
+        sem_close(gym_empty);
+        sem_unlink(EMPTY);
+        exit(EXIT_FAILURE);
+    }
+    gym_fill = sem_open(FILL, O_CREAT, S_IRUSR | S_IWUSR, 1);
+    if (gym_fill == SEM_FAILED){
+            perror("sem_open");
+            sem_close(gym_mutex);
+            sem_unlink(MUTEX);
+            sem_close(gym_empty);
+            sem_unlink(EMPTY);
+            exit(EXIT_FAILURE);
     }
 
     // if shm exixts, calls monitor else calls comprobador
@@ -208,7 +219,7 @@ int main(int argc, char *argv[]){
     else 
         monitor(fd_shm, lag); // monitor reads it
     
-    close_unlink()
+    close_unlink();
 
     return 0;
 }
