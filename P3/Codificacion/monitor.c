@@ -287,9 +287,6 @@ int main(int argc, char *argv[]){
 
     lag = atoi(argv[1]);
 
-    shm_unlink(SHM_NAME); // just in case
-    mq_unlink(MQ_NAME); // just in case
-
     // if shm exixts, calls monitor else calls comprobador
     fd_shm = shm_open(SHM_NAME, O_RDWR, 0666);
     if (fd_shm == -1){ // -1 shm does not exist
@@ -298,5 +295,8 @@ int main(int argc, char *argv[]){
     }else
         monitor(fd_shm, lag); // monitor reads it
 
+    shm_unlink(SHM_NAME); // just in case
+    mq_unlink(MQ_NAME); // just in case
+    
     return 0;
 }
