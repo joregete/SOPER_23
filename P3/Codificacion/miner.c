@@ -19,10 +19,9 @@
  * @return 0 on success, -1 on failure
 */
 int main(int argc, char *argv[]){
-    MESSAGE msg;
+    int msg[2]; // msg[0] = target, msg[1] = solution
     struct mq_attr attr;
-    int rounds = 0, lag = 0, 
-        i = 0;
+    int rounds = 0, lag = 0, i = 0;
     mqd_t mq;
 
     if(argc != 3){
@@ -33,33 +32,47 @@ int main(int argc, char *argv[]){
     rounds = atoi(argv[1]);
     lag = atoi(argv[2]);
 
-    attr.mq_maxmsg = MAX_MSG; // max number of messages in queue
-    attr.mq_msgsize = MAX_MSG_BODY; // max size of message
-    msg.target = 0;
+    // Initialize the message queue
+    attr = (struct mq_attr){
+        .mq_flags = 0,
+        .mq_maxmsg = MAX_MSG,
+        .mq_msgsize = sizeof(long)*2,
+        .mq_curmsgs = 0
+    };
 
+    // Open the message queue
     if((mq = mq_open(MQ_NAME, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
+        perror("mq_open");
         exit(EXIT_FAILURE);
     }
 
+    // Generate blocks
+    fprintf(stdout, "[%08d] Generating blocks...\n", getpid ());
+
+    msg[SOLUTION] = 0;
+    msg[TARGET] = 0;
     for(i = 0; i < rounds; i++){
-        msg.solution = pow_hash(msg.target);
+        msg[SOLUTION] = pow_hash(msg[TARGET]);
         if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){ // 1 is the priority
             mq_close(mq); 
             mq_unlink(MQ_NAME);
             exit(EXIT_FAILURE);
         }
         sleep(lag);
-        msg.target = msg.solution;
+    
+        msg[TARGET] = msg[SOLUTION]; // the new target is the solution of the previous block
     }
 
-    fprintf(stdout, "\nfinishing...\n");
-    msg.solution = -1;
-    msg.target = -1;
+    
+    msg[TARGET] = -1;
+    msg[SOLUTION] = -1;
     if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){
+        perror("mq_send");
         mq_close(mq); 
         mq_unlink(MQ_NAME);
         exit(EXIT_FAILURE);
     }
+    fprintf(stdout, "[%08d] Finishing\n", getpid ());
 
     mq_close(mq);
     mq_unlink(MQ_NAME);
