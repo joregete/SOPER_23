@@ -43,10 +43,9 @@ typedef struct _sharedMemory{
  * @return void
 */
 void comprobador(int lag){
-    int fd_shm,
-        msg[2], // msg[0] = target, msg[1] = solution
-        aux_writing;
+    int fd_shm, index;
     SharedMemory *shmem = NULL;
+    MESSAGE msg;
     mqd_t mq;
     struct mq_attr attr;
     
@@ -110,14 +109,11 @@ void comprobador(int lag){
         exit(EXIT_FAILURE);
     }
 
-    // attr.mq_maxmsg = MAX_MSG;
-    // attr.mq_msgsize = MAX_MSG_BODY;
-
     //set message queue attributes
     attr = (struct mq_attr){
         .mq_flags = 0,
         .mq_maxmsg = MAX_MSG,
-        .mq_msgsize = sizeof(long)*2,
+        .mq_msgsize = SIZE,
         .mq_curmsgs = 0
     };
 
@@ -140,7 +136,7 @@ void comprobador(int lag){
     fprintf(stdout,"[%08d] Checking blocks...\n", getpid());
     while(1){
         // receive message from MQ
-        if(mq_receive(mq, (char *)&msg, sizeof(int)*2, NULL) == -1){
+        if(mq_receive(mq, (char *)&msg, SIZE, NULL) == -1){
             perror("mq_receive");
             if(shmem->using == 1){
                 sem_destroy(&(shmem->gym_mutex));
@@ -153,7 +149,8 @@ void comprobador(int lag){
             munmap(shmem, sizeof(SharedMemory));
             exit(EXIT_FAILURE);
         }
-        if(msg[TARGET] == -1 && msg[SOLUTION] == -1){
+
+        if(msg.block.end){
             fprintf(stdout, "[%08d] Finishing\n", getpid());
             // FINALIZAR PROGRAMA
             // flag = -1; // flag to end monitor
@@ -161,10 +158,10 @@ void comprobador(int lag){
             sem_wait(&(shmem->gym_mutex));
 
             /* ----------- Protected ----------- */
-            aux_writing = shmem-> writing % BUFFER_LENGTH;
+            index = shmem-> writing % BUFFER_LENGTH;
             shmem->writing++;
-            shmem->target[aux_writing] = msg[TARGET]; // = -1
-            shmem->solution[aux_writing] = msg[1]; // = -1
+            shmem->target[index] = -1;
+            shmem->solution[index] = -1;
 
             if(shmem->using == 1){
                 sem_destroy(&(shmem->gym_mutex));
@@ -190,11 +187,11 @@ void comprobador(int lag){
         sem_wait(&(shmem->gym_mutex));
 
         /* ----------- Protected ----------- */
-        aux_writing = shmem->writing % BUFFER_LENGTH;
+        index = shmem->writing % BUFFER_LENGTH;
         shmem->writing++;
-        shmem->target[aux_writing] = msg[TARGET];
-        shmem->solution[aux_writing] = msg[SOLUTION];
-        shmem->flag[aux_writing] = (pow_hash(msg[SOLUTION]) == msg[TARGET]);
+        shmem->target[index] = msg.block.target;
+        shmem->solution[index] = msg.block.solution;
+        shmem->flag[index] = (pow_hash(shmem->solution[index]) == shmem->target[index]);
         /* ------------- end prot --------------- */
         
         sem_post(&(shmem->gym_mutex));

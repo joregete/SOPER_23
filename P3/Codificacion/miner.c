@@ -7,10 +7,29 @@
 *
 */
 
-#include <stdio.h>
-#include <stdlib.h>
 #include "common.h"
 #include "pow.h"
+
+/**
+ * @brief Generates a block with a target and a solution
+ * @return block (Block struct)
+ * 
+*/
+Block work(){
+    Block block;
+    long target, solution;
+
+    for (target = 0; target < POW_LIMIT; target++){
+        solution = pow_hash(target);
+        if (solution == target){
+            block.target = target;
+            block.solution = solution;
+            block.flag = 0;
+            break;
+        }
+    }
+    return block;
+}
 
 /**
  * @brief Miner process
@@ -19,7 +38,8 @@
  * @return 0 on success, -1 on failure
 */
 int main(int argc, char *argv[]){
-    int msg[2]; // msg[0] = target, msg[1] = solution
+    Block block;
+    MESSAGE msg;
     struct mq_attr attr;
     int rounds = 0, lag = 0, i = 0;
     mqd_t mq;
@@ -29,6 +49,7 @@ int main(int argc, char *argv[]){
         exit(EXIT_FAILURE);
     }
 
+    // Getting arguments
     rounds = atoi(argv[1]);
     lag = atoi(argv[2]);
 
@@ -36,7 +57,7 @@ int main(int argc, char *argv[]){
     attr = (struct mq_attr){
         .mq_flags = 0,
         .mq_maxmsg = MAX_MSG,
-        .mq_msgsize = sizeof(long)*2,
+        .mq_msgsize = SIZE,
         .mq_curmsgs = 0
     };
 
@@ -49,29 +70,29 @@ int main(int argc, char *argv[]){
     // Generate blocks
     fprintf(stdout, "[%08d] Generating blocks...\n", getpid ());
 
-    msg[SOLUTION] = 0;
-    msg[TARGET] = 0;
     for(i = 0; i < rounds; i++){
-        msg[SOLUTION] = pow_hash(msg[TARGET]);
-        if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){ // 1 is the priority
+        block = work();
+        if(i == rounds-1)
+            block.end = 1;
+
+        msg.block = block;
+
+        if(mq_send(mq, (char*)&msg, SIZE, 1) == -1){ // 1 is for the priority
+            perror("mq_send");
             mq_close(mq); 
             mq_unlink(MQ_NAME);
             exit(EXIT_FAILURE);
         }
-        sleep(lag);
-    
-        msg[TARGET] = msg[SOLUTION]; // the new target is the solution of the previous block
+        usleep(lag*1000000);
+
     }
 
-    
-    msg[TARGET] = -1;
-    msg[SOLUTION] = -1;
-    if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){
-        perror("mq_send");
-        mq_close(mq); 
-        mq_unlink(MQ_NAME);
-        exit(EXIT_FAILURE);
-    }
+    // if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){
+    //     perror("mq_send");
+    //     mq_close(mq); 
+    //     mq_unlink(MQ_NAME);
+    //     exit(EXIT_FAILURE);
+    // }
     fprintf(stdout, "[%08d] Finishing\n", getpid ());
 
     mq_close(mq);
