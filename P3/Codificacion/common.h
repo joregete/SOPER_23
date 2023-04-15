@@ -3,15 +3,11 @@
 
 #include <mqueue.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "pow.h"
 
-typedef struct _message{
-    long target;
-    long solution;
-} MESSAGE;
-
 #define MAX_MSG 7
-#define MAX_MSG_BODY 16
+#define MAX_MSG_BODY 20
 #define MQ_NAME "/mq_facepulls"
 
 #endif

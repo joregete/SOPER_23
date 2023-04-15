@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "common.h"
 #include "pow.h"
 
@@ -19,7 +20,8 @@
  * @return 0 on success, -1 on failure
 */
 int main(int argc, char *argv[]){
-    MESSAGE msg;
+    char msg[MAX_MSG_BODY];
+    long solution = 0, target = 0;
     struct mq_attr attr;
     int rounds = 0, lag = 0, 
         i = 0;
@@ -35,27 +37,28 @@ int main(int argc, char *argv[]){
 
     attr.mq_maxmsg = MAX_MSG; // max number of messages in queue
     attr.mq_msgsize = MAX_MSG_BODY; // max size of message
-    msg.target = 0;
 
     if((mq = mq_open(MQ_NAME, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
         exit(EXIT_FAILURE);
     }
 
     for(i = 0; i < rounds; i++){
-        msg.solution = pow_hash(msg.target);
-        if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){ // 1 is the priority
+        solution = pow_hash(target);
+        sprintf(msg, "%ld %ld", solution, target);
+        if(mq_send(mq, msg, strlen(msg), 1) == -1){ // 1 is the priority
             mq_close(mq); 
             mq_unlink(MQ_NAME);
             exit(EXIT_FAILURE);
         }
         sleep(lag);
-        msg.target = msg.solution;
+        target = solution;
     }
 
     fprintf(stdout, "\nfinishing...\n");
-    msg.solution = -1;
-    msg.target = -1;
-    if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){
+    solution = -1;
+    target = -1;
+    sprintf(msg, "%ld %ld", solution, target);
+    if(mq_send(mq, msg, strlen(msg), 1) == -1){
         mq_close(mq); 
         mq_unlink(MQ_NAME);
         exit(EXIT_FAILURE);

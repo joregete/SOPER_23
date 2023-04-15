@@ -54,7 +54,8 @@ void comprobador(int lag){
     short flag; // 0 = ERROR, 1 = OK, -1 = END
     mqd_t mq;
     struct mq_attr attr;
-    MESSAGE msg;
+    char rcv_msg[MAX_MSG_BODY];
+    long target, solution;
     Block *block = NULL;
     // TODO: CHECK FOR THE CIRCULAR BUFFER IMPLEMENTATION
     
@@ -87,25 +88,29 @@ void comprobador(int lag){
     attr.mq_maxmsg = MAX_MSG;
     attr.mq_msgsize = MAX_MSG_BODY;
 
-    if((mq = mq_open(MQ_NAME, O_CREAT | O_RDONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t)-1){
+    if((mq = mq_open(MQ_NAME, O_RDONLY) == -1)){
+        perror("mq_open");
         close(fd_shm);
         shm_unlink(SHM_NAME);
         close_unlink();
         exit(EXIT_FAILURE);
     }
 
-    mq_unlink(MQ_NAME); // as early as possible
-
     while(1){
         // receive message from MQ
-        if(mq_receive(mq, (char *)&msg, sizeof(msg), NULL) == -1){
+        if(mq_receive(mq, rcv_msg, MAX_MSG_BODY, NULL) == -1){
             perror("mq_receive");
             close(fd_shm);
             shm_unlink(SHM_NAME);
             close_unlink();
+            mq_close(mq);
+            mq_unlink(MQ_NAME);
             exit(EXIT_FAILURE);
         }
-        if(msg.target == -1){
+        // parse message
+        printf(">> Received message: %s\n", rcv_msg);
+        sscanf(rcv_msg, "%ld %ld", &target, &solution);
+        if(target == -1){
             // FINALIZAR PROGRAMA
             fprintf(stdout, "\nfinishing...\n");
             flag = -1; // flag to end monitor
@@ -124,9 +129,9 @@ void comprobador(int lag){
         sem_wait(gym_empty);
         sem_wait(gym_mutex);
         // update shared memory
-            memcpy(&block->solution, &msg.solution, sizeof(msg.solution));
-            memcpy(&block->target, &msg.target, sizeof(msg.target));
-            if(msg.solution == pow_hash(msg.target)){
+            memcpy(&block->solution, &solution, sizeof(solution));
+            memcpy(&block->target, &target, sizeof(target));
+            if(solution == pow_hash(target)){
                 flag = 1;
                 memcpy(&block->flag, &flag, sizeof(flag)); // MINER WAS CORRECT
             }
@@ -157,7 +162,8 @@ void monitor(int fd_shm, int lag){
         close(fd_shm);
         exit(EXIT_FAILURE);
     }
-
+    printf(">> Monitor\n");
+    
     while(1){
         sem_wait(gym_fill);
         sem_wait(gym_mutex);
