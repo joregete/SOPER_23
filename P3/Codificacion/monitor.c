@@ -57,11 +57,11 @@ void comprobador(int lag){
     MESSAGE msg;
     Block *block = NULL;
     // TODO: CHECK FOR THE CIRCULAR BUFFER IMPLEMENTATION
-
+    
     printf(">> Comprobador\n");
 
     //open shared memory
-    if((fd_shm = shm_open(SHM_NAME, O_RDONLY, 0)) == -1){
+    if((fd_shm = shm_open (SHM_NAME, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1){
         perror("shm_open");
         close_unlink();
         exit(EXIT_FAILURE);
@@ -87,7 +87,7 @@ void comprobador(int lag){
     attr.mq_maxmsg = MAX_MSG;
     attr.mq_msgsize = MAX_MSG_BODY;
 
-    if((mq = mq_open(MQ_NAME, O_CREAT | O_RDONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
+    if((mq = mq_open(MQ_NAME, O_CREAT | O_RDONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t)-1){
         close(fd_shm);
         shm_unlink(SHM_NAME);
         close_unlink();
@@ -109,8 +109,11 @@ void comprobador(int lag){
             // FINALIZAR PROGRAMA
             fprintf(stdout, "\nfinishing...\n");
             flag = -1; // flag to end monitor
-            // TODO: NO SE SI AQUI TAMBIEN HAY QUE USAR SEMAFOROS, supongo que si
-            memcpy(&(block->flag), &flag, sizeof(flag));
+            sem_wait(gym_empty);
+            sem_wait(gym_mutex);
+                memcpy(&(block->flag), &flag, sizeof(flag));
+            sem_post(gym_mutex);
+            sem_post(gym_fill);
             mq_close(mq);
             close(fd_shm);
             shm_unlink(SHM_NAME);
@@ -120,8 +123,8 @@ void comprobador(int lag){
 
         sem_wait(gym_empty);
         sem_wait(gym_mutex);
-        // update shared memory   
-            memcpy(&block->solution, &msg.solution, sizeof(msg.solution)); // TODO: check return value == NULL????
+        // update shared memory
+            memcpy(&block->solution, &msg.solution, sizeof(msg.solution));
             memcpy(&block->target, &msg.target, sizeof(msg.target));
             if(msg.solution == pow_hash(msg.target)){
                 flag = 1;
@@ -155,7 +158,9 @@ void monitor(int fd_shm, int lag){
         exit(EXIT_FAILURE);
     }
 
-    while(1){ //TODO: dónde va el fucking semaforo?
+    while(1){
+        sem_wait(gym_fill);
+        sem_wait(gym_mutex);
         if(block->flag == -1){
             // FINALIZAR PROGRAMA
             fprintf(stdout, "\nfinishing...\n");
@@ -168,6 +173,8 @@ void monitor(int fd_shm, int lag){
             printf("Solution accepted: %08ld -> %08ld\n" , block->target, block->solution);
         else
             printf("Solution rejected: %08ld -> %08ld\n" , block->target, block->solution);
+        sem_post(gym_mutex);
+        sem_post(gym_empty);
         
         sleep(lag);
     }
@@ -184,39 +191,38 @@ int main(int argc, char *argv[]){
 
     lag = atoi(argv[1]);
 
-    gym_mutex = sem_open(MUTEX, O_CREAT, S_IRUSR | S_IWUSR, 1);
+    close_unlink(); // close and unlink semaphores
+
+    gym_mutex = sem_open(MUTEX, O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 1); // O_EXCL flag in the case that the sem already exists 
     if (gym_mutex == SEM_FAILED){
-        perror("sem_open");
-        sem_close(gym_mutex);
-        sem_unlink(MUTEX);
-        sem_close(gym_empty);
-        sem_unlink(EMPTY);
+        perror("sem_open 1");
         exit(EXIT_FAILURE);
     }
-    gym_empty = sem_open(EMPTY, O_CREAT, S_IRUSR | S_IWUSR, 1);
+
+    gym_empty = sem_open(EMPTY, O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 1);
     if (gym_empty == SEM_FAILED){
-        perror("sem_open");
+        perror("sem_open 2");
+        sem_close(gym_mutex);
+        sem_unlink(MUTEX);
+        exit(EXIT_FAILURE);
+    }
+    
+    gym_fill = sem_open(FILL, O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 1);
+    if (gym_fill == SEM_FAILED){
+        perror("sem_open 3");
         sem_close(gym_mutex);
         sem_unlink(MUTEX);
         sem_close(gym_empty);
         sem_unlink(EMPTY);
         exit(EXIT_FAILURE);
-    }
-    gym_fill = sem_open(FILL, O_CREAT, S_IRUSR | S_IWUSR, 1);
-    if (gym_fill == SEM_FAILED){
-            perror("sem_open");
-            sem_close(gym_mutex);
-            sem_unlink(MUTEX);
-            sem_close(gym_empty);
-            sem_unlink(EMPTY);
-            exit(EXIT_FAILURE);
     }
 
     // if shm exixts, calls monitor else calls comprobador
     fd_shm = shm_open(SHM_NAME, O_RDWR, 0666);
-    if (fd_shm == -1) // -1 shm does not exist
+    if (fd_shm == -1){ // -1 shm does not exist
+        mq_unlink(MQ_NAME);
         comprobador(lag); // comprobador creates it
-    else 
+    }else
         monitor(fd_shm, lag); // monitor reads it
     
     close_unlink();

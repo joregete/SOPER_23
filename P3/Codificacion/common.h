@@ -11,7 +11,7 @@ typedef struct _message{
 } MESSAGE;
 
 #define MAX_MSG 7
-#define MAX_MSG_BODY 1024
+#define MAX_MSG_BODY 16
 #define MQ_NAME "/mq_facepulls"
 
 #endif
