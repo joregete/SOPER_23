@@ -7,9 +7,9 @@
 #include <mqueue.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/stat.h>
 #include <sys/mman.h>
 #include "pow.h"
-
 
 typedef struct _block{
     long target;

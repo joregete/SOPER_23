@@ -133,7 +133,6 @@ void comprobador(int lag){
 
     mq_unlink(MQ_NAME); // as early as possible
 
-
     fprintf(stdout,"[%08d] Checking blocks...\n", getpid());
     while(1){
         // receive message from MQ

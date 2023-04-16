@@ -8,7 +8,6 @@
 */
 
 #include "common.h"
-#include "pow.h"
 
 long globalTarget = 0;
 
@@ -28,6 +27,7 @@ Block* work(){
             block->solution = result;
             block->target = i;
             block->flag = 0;
+            block->end = 0;
             globalTarget = i;
             break;
         }
@@ -72,11 +72,8 @@ int main(int argc, char *argv[]){
         exit(EXIT_FAILURE);
     }
 
-    // Initialize the message attributes to 0
-    // memset(&msg, 0, sizeof(msg));
-
     // Generate blocks
-    fprintf(stdout, "[%08d] Generating blocks...\n", getpid ());
+    fprintf(stdout, "[%08d] Generating blocks...\n", getpid());
 
     for(i = 0; i < rounds; i++){
         block = work();
@@ -85,7 +82,6 @@ int main(int argc, char *argv[]){
 
         msg.block = *block;
 
-        // fprintf(stdout, "\n Solution %ld Target %ld.", block->solution, block->target);
         if(mq_send(mq, (char*)&msg, SIZE, 1) == -1){ // 1 is for the priority
             perror("mq_send");
             mq_close(mq); 
@@ -98,13 +94,6 @@ int main(int argc, char *argv[]){
         free(block);
         nanosleep(&delay, NULL);
     }
-
-    // if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){
-    //     perror("mq_send");
-    //     mq_close(mq); 
-    //     mq_unlink(MQ_NAME);
-    //     exit(EXIT_FAILURE);
-    // }
     fprintf(stdout, "[%08d] Finishing\n", getpid ());
 
     mq_close(mq);
