@@ -10,21 +10,25 @@
 #include "common.h"
 #include "pow.h"
 
+long globalTarget = 0;
+
 /**
  * @brief Generates a block with a target and a solution
  * @return block (Block struct)
  * 
 */
-Block work(){
-    Block block;
-    long target, solution;
+Block* work(){
+    Block *block;
+    long i, result;
 
-    for (target = 0; target < POW_LIMIT; target++){
-        solution = pow_hash(target);
-        if (solution == target){
-            block.target = target;
-            block.solution = solution;
-            block.flag = 0;
+    block = malloc(sizeof(Block));
+    for (i = 0; i < POW_LIMIT; i++){
+        result = pow_hash(i);
+        if (result == globalTarget){
+            block->solution = result;
+            block->target = i;
+            block->flag = 0;
+            globalTarget = i;
             break;
         }
     }
@@ -38,9 +42,10 @@ Block work(){
  * @return 0 on success, -1 on failure
 */
 int main(int argc, char *argv[]){
-    Block block;
+    Block *block;
     MESSAGE msg;
     struct mq_attr attr;
+    struct timespec delay;
     int rounds = 0, lag = 0, i = 0;
     mqd_t mq;
 
@@ -53,7 +58,7 @@ int main(int argc, char *argv[]){
     rounds = atoi(argv[1]);
     lag = atoi(argv[2]);
 
-    // Initialize the message queue
+    // Initialize the queue attributes
     attr = (struct mq_attr){
         .mq_flags = 0,
         .mq_maxmsg = MAX_MSG,
@@ -67,24 +72,31 @@ int main(int argc, char *argv[]){
         exit(EXIT_FAILURE);
     }
 
+    // Initialize the message attributes to 0
+    // memset(&msg, 0, sizeof(msg));
+
     // Generate blocks
     fprintf(stdout, "[%08d] Generating blocks...\n", getpid ());
 
     for(i = 0; i < rounds; i++){
         block = work();
         if(i == rounds-1)
-            block.end = 1;
+            block->end = 1;
 
-        msg.block = block;
+        msg.block = *block;
 
+        // fprintf(stdout, "\n Solution %ld Target %ld.", block->solution, block->target);
         if(mq_send(mq, (char*)&msg, SIZE, 1) == -1){ // 1 is for the priority
             perror("mq_send");
             mq_close(mq); 
             mq_unlink(MQ_NAME);
             exit(EXIT_FAILURE);
         }
-        usleep(lag*1000000);
-
+        delay.tv_sec = 0; // espera 0 segundos
+        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
+        
+        free(block);
+        nanosleep(&delay, NULL);
     }
 
     // if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){

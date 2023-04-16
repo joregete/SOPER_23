@@ -21,6 +21,7 @@
 // #define MUTEX "/mutex_facepulls"
 // #define EMPTY "/sem_empty_facepulls"
 // #define FILL "/sem_fill_facepulls"
+struct timespec delay;
 
 typedef struct _sharedMemory{
     short flag[BUFFER_LENGTH];
@@ -150,7 +151,7 @@ void comprobador(int lag){
             exit(EXIT_FAILURE);
         }
 
-        if(msg.block.end){
+        if(msg.block.end == 1){
             fprintf(stdout, "[%08d] Finishing\n", getpid());
             // FINALIZAR PROGRAMA
             // flag = -1; // flag to end monitor
@@ -186,17 +187,20 @@ void comprobador(int lag){
         sem_wait(&(shmem->gym_empty));
         sem_wait(&(shmem->gym_mutex));
 
-        /* ----------- Protected ----------- */
+        /* ----------- Protected ----------- */ //si solution es igual a pow_hash(target) entonces flag = 1
         index = shmem->writing % BUFFER_LENGTH;
         shmem->writing++;
         shmem->target[index] = msg.block.target;
         shmem->solution[index] = msg.block.solution;
-        shmem->flag[index] = (pow_hash(shmem->solution[index]) == shmem->target[index]);
+        shmem->flag[index] = (pow_hash(shmem->target[index]) == shmem->solution[index]);
         /* ------------- end prot --------------- */
         
         sem_post(&(shmem->gym_mutex));
         sem_post(&(shmem->gym_fill));
-        sleep(lag);
+
+        delay.tv_sec = 0; // espera 0 segundos
+        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
+        nanosleep(&delay, NULL);
     }
 }
 
@@ -267,11 +271,13 @@ void monitor(int fd_shm, int lag){
         /* ------------- end prot --------------- */
 
         if(aux_flag == 1)
-            printf("Solution accepted: %08d -> %08d\n" , target, solution);
+            printf("Solution accepted: %08d -> %08d\n", solution, target);
         else
-            printf("Solution rejected: %08d -> %08d\n" , target, solution);
+            printf("Solution rejected: %08d -> %08d\n", solution, target);
         
-        sleep(lag);
+        delay.tv_sec = 0; // espera 0 segundos
+        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
+        nanosleep(&delay, NULL);
     }
 }
 
@@ -287,9 +293,6 @@ int main(int argc, char *argv[]){
 
     lag = atoi(argv[1]);
 
-    shm_unlink(SHM_NAME); // just in case
-    mq_unlink(MQ_NAME); // just in case
-
     // if shm exixts, calls monitor else calls comprobador
     fd_shm = shm_open(SHM_NAME, O_RDWR, 0666);
     if (fd_shm == -1){ // -1 shm does not exist
@@ -297,6 +300,10 @@ int main(int argc, char *argv[]){
         comprobador(lag); // comprobador creates it
     }else
         monitor(fd_shm, lag); // monitor reads it
+
+    
+    shm_unlink(SHM_NAME);
+    mq_unlink(MQ_NAME); 
 
     return 0;
 }

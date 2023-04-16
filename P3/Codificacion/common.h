@@ -3,10 +3,13 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <mqueue.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/mman.h>
 #include "pow.h"
+
 
 typedef struct _block{
     long target;
