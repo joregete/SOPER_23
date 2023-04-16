@@ -7,11 +7,33 @@
 *
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include "common.h"
 #include "pow.h"
+
+long globalTarget = 0;
+
+/**
+ * @brief Generates a block with a target and a solution
+ * @return block (Block struct)
+ * 
+*/
+Block* work(){
+    Block *block;
+    long i, result;
+
+    block = malloc(sizeof(Block));
+    for (i = 0; i < POW_LIMIT; i++){
+        result = pow_hash(i);
+        if (result == globalTarget){
+            block->solution = result;
+            block->target = i;
+            block->flag = 0;
+            globalTarget = i;
+            break;
+        }
+    }
+    return block;
+}
 
 /**
  * @brief Miner process
@@ -20,11 +42,11 @@
  * @return 0 on success, -1 on failure
 */
 int main(int argc, char *argv[]){
-    char msg[MAX_MSG_BODY];
-    long solution = 0, target = 0;
+    Block *block;
+    MESSAGE msg;
     struct mq_attr attr;
-    int rounds = 0, lag = 0, 
-        i = 0;
+    struct timespec delay;
+    int rounds = 0, lag = 0, i = 0;
     mqd_t mq;
 
     if(argc != 3){
@@ -32,37 +54,58 @@ int main(int argc, char *argv[]){
         exit(EXIT_FAILURE);
     }
 
+    // Getting arguments
     rounds = atoi(argv[1]);
     lag = atoi(argv[2]);
 
-    attr.mq_maxmsg = MAX_MSG; // max number of messages in queue
-    attr.mq_msgsize = MAX_MSG_BODY; // max size of message
+    // Initialize the queue attributes
+    attr = (struct mq_attr){
+        .mq_flags = 0,
+        .mq_maxmsg = MAX_MSG,
+        .mq_msgsize = SIZE,
+        .mq_curmsgs = 0
+    };
 
+    // Open the message queue
     if((mq = mq_open(MQ_NAME, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
+        perror("mq_open");
         exit(EXIT_FAILURE);
     }
 
+    // Initialize the message attributes to 0
+    // memset(&msg, 0, sizeof(msg));
+
+    // Generate blocks
+    fprintf(stdout, "[%08d] Generating blocks...\n", getpid ());
+
     for(i = 0; i < rounds; i++){
-        solution = pow_hash(target);
-        sprintf(msg, "%ld %ld", solution, target);
-        if(mq_send(mq, msg, strlen(msg), 1) == -1){ // 1 is the priority
+        block = work();
+        if(i == rounds-1)
+            block->end = 1;
+
+        msg.block = *block;
+
+        // fprintf(stdout, "\n Solution %ld Target %ld.", block->solution, block->target);
+        if(mq_send(mq, (char*)&msg, SIZE, 1) == -1){ // 1 is for the priority
+            perror("mq_send");
             mq_close(mq); 
             mq_unlink(MQ_NAME);
             exit(EXIT_FAILURE);
         }
-        sleep(lag);
-        target = solution;
+        delay.tv_sec = 0; // espera 0 segundos
+        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
+        
+        free(block);
+        nanosleep(&delay, NULL);
     }
 
-    fprintf(stdout, "\nfinishing...\n");
-    solution = -1;
-    target = -1;
-    sprintf(msg, "%ld %ld", solution, target);
-    if(mq_send(mq, msg, strlen(msg), 1) == -1){
-        mq_close(mq); 
-        mq_unlink(MQ_NAME);
-        exit(EXIT_FAILURE);
-    }
+    // if(mq_send(mq, (char*)&msg, sizeof(msg), 1) == -1){
+    //     perror("mq_send");
+    //     mq_close(mq); 
+    //     mq_unlink(MQ_NAME);
+    //     exit(EXIT_FAILURE);
+    // }
+    fprintf(stdout, "[%08d] Finishing\n", getpid ());
 
     mq_close(mq);
     mq_unlink(MQ_NAME);

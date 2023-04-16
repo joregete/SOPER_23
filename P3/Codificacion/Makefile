@@ -12,7 +12,10 @@ monitor : monitor.c pow.c
 	$(CC) $(CFLAGS) $^ -o $@
 
 runvMiner: miner
-	# valgrind --leak-check=full --show-leak-kinds=all -s ./miner <ROUNDS> <LAG>
+	valgrind --leak-check=full -s ./miner 15 0
 
-runvMonitor: monitor
-	# valgrind --leak-check=full --show-leak-kinds=all -s ./monitor <LAG>
+runvMonitor1: monitor
+	valgrind --leak-check=full ./monitor 500
+
+runvMonitor2: monitor
+	valgrind --leak-check=full ./monitor 100
