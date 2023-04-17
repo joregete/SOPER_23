@@ -18,9 +18,6 @@
 
 /* ----------------------------------------- GLOBALS ---------------------------------------- */
 
-// #define MUTEX "/mutex_facepulls"
-// #define EMPTY "/sem_empty_facepulls"
-// #define FILL "/sem_fill_facepulls"
 struct timespec delay;
 
 typedef struct _sharedMemory{
@@ -153,7 +150,6 @@ void comprobador(int lag){
         if(msg.block.end == 1){
             fprintf(stdout, "[%08d] Finishing\n", getpid());
             // FINALIZAR PROGRAMA
-            // flag = -1; // flag to end monitor
             sem_wait(&(shmem->gym_empty));
             sem_wait(&(shmem->gym_mutex));
 
@@ -173,10 +169,10 @@ void comprobador(int lag){
                 shmem->writing++;
                 shmem->using--;
             }
-            /* ------------- end prot --------------- */
-
             sem_post(&(shmem->gym_mutex));
             sem_post(&(shmem->gym_fill));
+            /* ------------- end prot --------------- */
+            
             mq_close(mq);
             munmap(shmem, sizeof(SharedMemory));
             shm_unlink(SHM_NAME); //already done, but just in case, it wont hurt
@@ -256,9 +252,10 @@ void monitor(int fd_shm, int lag){
                 shmem->using--;
                 shmem->reading++;
             }
-        /* ------------- end prot--------------- */
             sem_post(&(shmem->gym_mutex));
             sem_post(&(shmem->gym_empty));
+        /* ------------- end prot--------------- */
+        
             munmap(shmem, sizeof(SharedMemory));
             exit(EXIT_SUCCESS);
         }
@@ -294,13 +291,11 @@ int main(int argc, char *argv[]){
 
     // if shm exixts, calls monitor else calls comprobador
     fd_shm = shm_open(SHM_NAME, O_RDWR, 0666);
-    if (fd_shm == -1){ // -1 shm does not exist
-        // mq_unlink(MQ_NAME);
+    if (fd_shm == -1) // -1 shm does not exist
         comprobador(lag); // comprobador creates it
-    }else
+    else
         monitor(fd_shm, lag); // monitor reads it
 
-    
     shm_unlink(SHM_NAME);
     mq_unlink(MQ_NAME); 
 

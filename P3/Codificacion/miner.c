@@ -21,6 +21,11 @@ Block* work(){
     long i, result;
 
     block = malloc(sizeof(Block));
+    if (block == NULL){
+        perror("malloc in work function");
+        exit(EXIT_FAILURE);
+    }
+
     for (i = 0; i < POW_LIMIT; i++){
         result = pow_hash(i);
         if (result == globalTarget){
@@ -75,6 +80,10 @@ int main(int argc, char *argv[]){
     // Generate blocks
     fprintf(stdout, "[%08d] Generating blocks...\n", getpid());
 
+    // Delay initialization
+    delay.tv_sec = 0; // waits 0 seconds
+    delay.tv_nsec = lag * 1000000; // waits "lag" milliseconds
+
     for(i = 0; i < rounds; i++){
         block = work();
         if(i == rounds-1)
@@ -88,9 +97,7 @@ int main(int argc, char *argv[]){
             mq_unlink(MQ_NAME);
             exit(EXIT_FAILURE);
         }
-        delay.tv_sec = 0; // espera 0 segundos
-        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
-        
+
         free(block);
         nanosleep(&delay, NULL);
     }
