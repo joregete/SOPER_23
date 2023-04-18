@@ -1,4 +1,4 @@
-#include "pow.h"
+#include "../includes/pow.h"
 
 #define PRIME POW_LIMIT
 #define BIG_X 435679812

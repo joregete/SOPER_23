@@ -8,6 +8,7 @@
 
 #include "miner.h"
 #include "monitor.h"
+
 void *wait4miner(void *pid);
 void *wait4monitor(void *pid);
 
@@ -19,7 +20,7 @@ void *wait4monitor(void *pid);
  * @return 0 Exit success or 1 Exit failure
  */
 int main(int argc, char *argv[]){
-    int minerPID, monitorPID, rounds, nthreads, target;;
+    int minerPID, monitorPID, rounds, nthreads, target;
     pthread_t minerThread, monitorThread;
     int monitorPipe[2], minerPipe[2]; // monitorPipe: comunicates monitor with miner; minerPipe: comunicates miner with monitor
     int pipeStatus;
@@ -37,13 +38,13 @@ int main(int argc, char *argv[]){
 
     rounds = atoi(argv[2]);
     if (rounds <= 0){
-        fprintf(stderr, "ROUNDS have to be greater than 0\n");
+        fprintf(stderr, "ROUNDS has to be greater than 0\n");
         exit(EXIT_FAILURE);
     }
 
     nthreads = atoi(argv[3]);
     if (nthreads <= 0){
-        fprintf(stderr, "The amount of miners(threads) have to be greater than 0\n");
+        fprintf(stderr, "The amount of miners(threads) has to be greater than 0\n");
         exit(EXIT_FAILURE);
     }
 

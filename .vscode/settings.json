@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "mman.h": "c",
-        "stat.h": "c"
+        "stat.h": "c",
+        "types.h": "c",
+        "miner.h": "c"
     }
 }
