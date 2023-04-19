@@ -6,7 +6,7 @@ CFLAGS = -Wall -g
 all : miner
 
 clean :
-	rm -f *.o miner monitor
+	rm -f *.o miner monitor *.txt
 
 miner : $(SRCLIB)miner.c $(SRCLIB)pow.c
 	$(CC) $(CFLAGS) $^ -o $@

@@ -6,6 +6,7 @@
 #include <semaphore.h>
 #include <stdint.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -27,7 +28,7 @@ typedef struct _block{
     short id; // unique block id
     int target; // target to be solved
     int solution; // solution to the target
-    pid_t miner_pid; // pid of the miner that solved the POW
+    pid_t winner; // pid of the miner that solved the POW
     Miner miners[MAX_MINERS]; // list of miners that voted for this block
     uint8_t total_votes; // total votes for this block
     uint8_t favorable_votes; // favorable votes for this block

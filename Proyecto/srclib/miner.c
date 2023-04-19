@@ -12,6 +12,13 @@
 
 #define SYSTEM_SHM "/deadlift_shm"
 
+void signal_handler(int sig) {
+    if (sig == SIGINT) {
+        printf("Miner %d received SIGINT\n", getpid());
+        exit(0);
+    }
+}
+
 int find_miner_index(Miner *miners, uint8_t num_miners, pid_t pid) {
     uint8_t i;
     for (i = 0; i < num_miners; i++) {
@@ -33,6 +40,33 @@ void delete_miner(Miner *miners, uint8_t *num_miners, pid_t pid) {
 }
 
 void _register(int pipe_read){
+    Block _block;
+    uint8_t ret = 0, num_miners = 0, i = 0;
+    char filename[15];
+    int fd;
+    sprintf(filename, "reg_%d.txt", getppid());
+    fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if(fd < 0){
+        perror("open");
+        exit(EXIT_FAILURE);
+    }
+    while(1){
+        ret = read(pipe_read, &_block, sizeof(Block));
+        if(ret == 0)
+            break;
+        if(ret < 0){
+            perror("read");
+            exit(EXIT_FAILURE);
+        }
+        num_miners = _block.total_votes;
+        dprintf(fd, "Id:\t\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%d\nSolution\t%08d\n",
+                     _block.id, _block.winner, _block.target, _block.solution);
+        dprintf(fd, "Votes:\t\t%d/%d\nWallets:", _block.favorable_votes, num_miners);
+        for(i = 0; i < num_miners; i++)
+            dprintf(fd, "\t%d:%02d", _block.miners[i].pid, _block.miners[i].coins);
+        dprintf(fd, "\n");
+    }
+    close(fd);
     exit(0);
 }
 
@@ -44,6 +78,7 @@ int main(int argc, char *argv[]){
     pid_t pid;
     int rounds, nthreads, fd_shm;
     int miner2register[2]; // pipe
+    struct sigaction act;
     System *system;
 
     if (argc != 3){
@@ -75,12 +110,12 @@ int main(int argc, char *argv[]){
     }
 
     if(pid == 0){ // register
-        close(miner2register[0]); // close write end
-        _register(miner2register[1]);
+        close(miner2register[1]); // close write end
+        _register(miner2register[0]);
     }
 
     // miner
-    close(miner2register[1]); // close read end
+    close(miner2register[0]); // close read end
     // if shm exixts, open it else create it
     fd_shm = shm_open(SYSTEM_SHM, O_RDWR, 0666);
     if (fd_shm == -1){ // -1 shm does not exist
@@ -145,9 +180,41 @@ int main(int argc, char *argv[]){
     Miner new_miner; // new miner representing this process
     new_miner.pid = getpid();
     new_miner.coins = 0;
+    act.sa_handler = signal_handler;
+    act.sa_flags = 0;
+    Block block;
+    block.favorable_votes = 1;
+    block.total_votes = 1;
+    block.id = 5345;
+    block.winner = 0001;
+    block.target = 9999;
+    block.solution = 0234;
+    block.miners[0].pid = getpid();
+    block.miners[0].coins = 7;
+    write(miner2register[1], &block, sizeof(block));
+    close(miner2register[1]);
+    sigfillset(&(act.sa_mask));
+    if(sigaction(SIGINT, &act, NULL) < 0){
+        perror("sigaction");
+        return 1;
+    }
+
+    if(sigaction(SIGUSR1, &act, NULL) < 0){
+        perror("sigaction");
+        return 1;
+    }
+    if(sigaction(SIGUSR2, &act, NULL) < 0){
+        perror("sigaction");
+        return 1;
+    }
+    
+    if(sigaction(SIGALRM, &act, NULL) < 0){
+        perror("sigaction");
+        return 1;
+    }
+
     sem_wait(&(system->empty));
     sem_wait(&(system->mutex));
-
     /* ----------- Protected ----------- */
     system->miners[system->num_miners] = new_miner;
     system->num_miners++;
@@ -157,10 +224,15 @@ int main(int argc, char *argv[]){
     /* ------------- end prot --------------- */
     printf("\nminer %d registered\n", new_miner.pid);
     sleep(5);
+    
+    
+    
+    
+    
+    
     printf("\nminer %d finished\n", new_miner.pid);
     sem_wait(&(system->empty));
     sem_wait(&(system->mutex));
-
     /* ----------- Protected ----------- */
     if(system->num_miners == 1){ // last miner
         printf("\nLast miner finished, deleting shared memory\n");
@@ -173,10 +245,10 @@ int main(int argc, char *argv[]){
         return 0;
     }
     delete_miner(system->miners, &(system->num_miners), new_miner.pid);
-    munmap(system, sizeof(System));
-    shm_unlink(SYSTEM_SHM);
     sem_post(&(system->mutex));
     sem_post(&(system->fill));
+    munmap(system, sizeof(System));
+    shm_unlink(SYSTEM_SHM);
     /* ------------- end prot --------------- */
     return 0;
 }
