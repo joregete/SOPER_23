@@ -73,7 +73,6 @@ void comprobador(int lag){
     }
 
     // Initialize the shared memory
-
     SharedMemory initialize = {
         .flag = {0},
         .target = {0},
@@ -85,7 +84,6 @@ void comprobador(int lag){
     memcpy(shmem, &initialize, sizeof(SharedMemory));
 
     // Initialize the semaphores
-
     if (sem_init(&(shmem->gym_mutex), 1, 1) == -1){
         perror("sem_init");
         shm_unlink(SHM_NAME);

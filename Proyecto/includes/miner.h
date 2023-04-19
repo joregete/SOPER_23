@@ -4,9 +4,13 @@
 #include <pthread.h>
 #include <fcntl.h>
 #include <semaphore.h>
+#include <stdint.h>
+#include <string.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+
+#define MAX_MINERS 100
 
 /**
  * @brief Miner structure
@@ -20,38 +24,25 @@ typedef struct _miner{
  * @brief Block structure
  */
 typedef struct _block{
-    int id; // unique block id
+    short id; // unique block id
     int target; // target to be solved
     int solution; // solution to the target
-    int miner_pid; // pid of the miner that solved the POW
-    List miners; // list of miners that voted for this block
-    short total_votes; // total votes for this block
-    short favorable_votes; // favorable votes for this block
+    pid_t miner_pid; // pid of the miner that solved the POW
+    Miner miners[MAX_MINERS]; // list of miners that voted for this block
+    uint8_t total_votes; // total votes for this block
+    uint8_t favorable_votes; // favorable votes for this block
 } Block;
 
 /**
- * @brief System structure
+ * @brief System structure, this is the shared memory
  */
 typedef struct _system{
-    List miners; // list of active miners
+    Miner miners[MAX_MINERS]; // list of active miners in the system
+    uint8_t num_miners; // number of active miners in the system
     Block last_block; // last block mined
     Block current_block; // current block being mined
     sem_t mutex; // mutex for the shared memory
     sem_t empty; // semaphore to protect shared memory
     sem_t fill; // semaphore to protect shared memory
+    uint8_t monitor_up; // flag to indicate if the monitor is up
 } System;
-
-/**
- * @brief Node structure
- */
-typedef struct _Node {
-    Miner *miner;
-    struct _Node *next;
-} Node;
-
-/**
- * @brief List structure
- */
-struct _List {
-    Node *first;
-};

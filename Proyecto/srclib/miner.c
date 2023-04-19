@@ -5,71 +5,44 @@
  * @date 2023-04-18
  * 
  * @copyright Copyright (c) 2023
- * 
  */
 
 #include "../includes/miner.h"
 #include "../includes/pow.h"
-#include "../includes/list.h"
 
 #define SYSTEM_SHM "/deadlift_shm"
-#define MAX_MINERS 100
 
-short list_isEmpty(List list) {
-    return (list.first == NULL ? 1 : 0);
+int find_miner_index(Miner *miners, uint8_t num_miners, pid_t pid) {
+    uint8_t i;
+    for (i = 0; i < num_miners; i++) {
+        if (miners[i].pid == pid) {
+            return i;
+        }
+    }
+    return -1;
 }
 
-void list_append(List list, Miner *miner) {
-    Node* newNode = (Node*) malloc(sizeof(Node));
-    if (newNode == NULL)
-        return;
-    
-    newNode->miner = miner;
-    newNode->next = NULL;
-
-    if (list.first == NULL) {
-        list.first = newNode;
-    } else {
-        Node* current = list.first;
-        while (current->next != NULL) {
-            current = current->next;
+void delete_miner(Miner *miners, uint8_t *num_miners, pid_t pid) {
+    uint8_t index = find_miner_index(miners, *num_miners, pid);
+    if (index != -1) {
+        for (uint8_t i = index; i < *num_miners - 1; i++) {
+            miners[i] = miners[i + 1];
         }
-        current->next = newNode;
+        (*num_miners)--;
     }
 }
 
-void list_delete(List list, Miner* miner) {
-    Node* current = list.first;
-    Node* previous = NULL;
-
-    while (current != NULL) {
-        if (current->miner == miner) {
-            if (previous == NULL) {
-                list.first = current->next;
-            } else {
-                previous->next = current->next;
-            }
-            free(current);
-            break;
-        }
-        previous = current;
-        current = current->next;
-    }
+void _register(int pipe_read){
+    exit(0);
 }
-
-void _register(int pipe_read);
 
 /**
- * @brief Main function for the miner rush
- * 
- * @param argc 
- * @param argv 
+ * @brief Main function for the miner process
  * @return 0 Exit success or 1 Exit failure
  */
 int main(int argc, char *argv[]){
     pid_t pid;
-    int rounds, nthreads, target, fd_shm;
-    pthread_t minerThread, monitorThread;
+    int rounds, nthreads, fd_shm;
     int miner2register[2]; // pipe
     System *system;
 
@@ -111,7 +84,8 @@ int main(int argc, char *argv[]){
     // if shm exixts, open it else create it
     fd_shm = shm_open(SYSTEM_SHM, O_RDWR, 0666);
     if (fd_shm == -1){ // -1 shm does not exist
-        //open shared memory
+        printf("\nCreating shared memory\n");
+        //create shared memory
         if((fd_shm = shm_open (SYSTEM_SHM, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1){
             perror("shm_open");
             exit(EXIT_FAILURE);
@@ -122,18 +96,87 @@ int main(int argc, char *argv[]){
             shm_unlink(SYSTEM_SHM);
             exit(EXIT_FAILURE);
         }
+
+        // Mapping of the memory segment
+        system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
+        close(fd_shm);
+        if(system == MAP_FAILED){
+            perror("mmap");
+            shm_unlink(SYSTEM_SHM);
+            exit(EXIT_FAILURE);
+        }
+
+        // Initialize the semaphores
+        if (sem_init(&(system->mutex), 1, 1) == -1){
+            perror("sem_init");
+            shm_unlink(SYSTEM_SHM);
+            exit(EXIT_FAILURE);
+        }
+
+        if(sem_init(&(system->empty), 1, MAX_MINERS) == -1){
+            perror("sem_init");
+            sem_destroy(&(system->mutex));
+            shm_unlink(SYSTEM_SHM);
+            exit(EXIT_FAILURE);
+        }
+
+        if(sem_init(&system->fill, 1, 0) == -1){
+            perror("sem_init");
+            sem_destroy(&(system->mutex));
+            sem_destroy(&(system->empty));
+            shm_unlink(SYSTEM_SHM);
+            exit(EXIT_FAILURE);
+        }
+    } else { // shm exists
+        // mapping of the memory segment
+        system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
+        close(fd_shm);
+        if(system == MAP_FAILED){
+            perror("mmap");
+            shm_unlink(SYSTEM_SHM);
+            exit(EXIT_FAILURE);
+        }
     }
-    // Mapping of the memory segment
-    system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
-    close(fd_shm);
-    if(system == MAP_FAILED){
-        perror("mmap");
+    if(system->num_miners == MAX_MINERS){
+        printf("\nsystem doesn't accept more miners\n");
         shm_unlink(SYSTEM_SHM);
-        exit(EXIT_FAILURE);
+        exit(EXIT_SUCCESS);
     }
+    Miner new_miner; // new miner representing this process
+    new_miner.pid = getpid();
+    new_miner.coins = 0;
+    sem_wait(&(system->empty));
+    sem_wait(&(system->mutex));
 
-}
+    /* ----------- Protected ----------- */
+    system->miners[system->num_miners] = new_miner;
+    system->num_miners++;
+    
+    sem_post(&(system->mutex));
+    sem_post(&(system->fill));
+    /* ------------- end prot --------------- */
+    printf("\nminer %d registered\n", new_miner.pid);
+    sleep(5);
+    printf("\nminer %d finished\n", new_miner.pid);
+    sem_wait(&(system->empty));
+    sem_wait(&(system->mutex));
 
-void _register(int pipe_read){
-    return;
+    /* ----------- Protected ----------- */
+    if(system->num_miners == 1){ // last miner
+        printf("\nLast miner finished, deleting shared memory\n");
+        sem_destroy(&(system->mutex));
+        sem_destroy(&(system->empty));
+        sem_destroy(&(system->fill));
+        delete_miner(system->miners, &(system->num_miners), new_miner.pid);
+        munmap(system, sizeof(System));
+        shm_unlink(SYSTEM_SHM);
+        return 0;
+    }
+    delete_miner(system->miners, &(system->num_miners), new_miner.pid);
+    munmap(system, sizeof(System));
+    shm_unlink(SYSTEM_SHM);
+    sem_post(&(system->mutex));
+    sem_post(&(system->fill));
+    /* ------------- end prot --------------- */
+    return 0;
 }
