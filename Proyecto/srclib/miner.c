@@ -32,7 +32,7 @@ void signal_handler(int sig) {
     if (sig == SIGALRM) {
         printf("Miner %d finishing by alarm...\n", getpid());
         shutdown = 1;
-        raise(SIGINT);
+        // raise(SIGINT);
     }
 }
 
@@ -246,19 +246,7 @@ int main(int argc, char *argv[]){
             shm_unlink(SYSTEM_SHM);
             exit(EXIT_FAILURE);
         }
-        if(sem_init(&(system->empty), 1, MAX_MINERS) == -1){
-            perror("sem_init");
-            sem_destroy(&(system->mutex));
-            shm_unlink(SYSTEM_SHM);
-            exit(EXIT_FAILURE);
-        }
-        if(sem_init(&system->fill, 1, 0) == -1){
-            perror("sem_init");
-            sem_destroy(&(system->mutex));
-            sem_destroy(&(system->empty));
-            shm_unlink(SYSTEM_SHM);
-            exit(EXIT_FAILURE);
-        }
+
     } else { // shm exists
         // mapping of the memory segment
         system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
@@ -304,13 +292,11 @@ int main(int argc, char *argv[]){
     this_miner.pid = getpid();
     this_miner.coins = 0;
 
-    sem_wait(&(system->empty));
     sem_wait(&(system->mutex));
     /* ----------- Protected ----------- */
     system->miners[system->num_miners] = this_miner;
     system->num_miners++;
     sem_post(&(system->mutex));
-    sem_post(&(system->fill));
     /* ------------- end prot --------------- */
     printf("\nminer %d registered\n", this_miner.pid);
     // remove SIGUSR1 from auxiliar mask, for whenever this miner needs to be suspended
@@ -323,7 +309,6 @@ int main(int argc, char *argv[]){
     if(first_miner_flag == 1){
         Block first_block;
         init_block(&first_block, -1, 0); // initialize first block ever
-        sem_wait(&(system->empty));
         sem_wait(&(system->mutex));
         /* ----------- Protected ----------- */
         system->current_block = first_block; // first block ready to get mined
@@ -333,7 +318,6 @@ int main(int argc, char *argv[]){
                 kill(system->miners[i].pid, SIGUSR1);
         }
         sem_post(&(system->mutex));
-        sem_post(&(system->fill));
         /* ------------- end prot --------------- */        
     } else
         sigsuspend(&a); // wait for SIGUSR1, wait for start of first round
@@ -355,12 +339,10 @@ int main(int argc, char *argv[]){
         sigusr2_received = 0;
         magic_flag = 0;
         // get this round's target
-        sem_wait(&(system->fill));
         sem_wait(&(system->mutex));
         /* ----------- Protected ----------- */
         target = system->current_block.target;
         sem_post(&(system->mutex));
-        sem_post(&(system->empty));
         /* ------------- end prot --------------- */
         // start mining
         for(j = 0; j < nthreads; j++){
@@ -385,7 +367,6 @@ int main(int argc, char *argv[]){
         }
         // check if this dude is the first to finish
         if(sigusr2_received == 0){ // WINNER WINNER CHICKEN DINNER
-            sem_wait(&(system->fill));
             sem_wait(&(system->mutex));
             /* ----------- Protected ----------- */
             // update current block and send sigusr2 to all miners
@@ -395,17 +376,16 @@ int main(int argc, char *argv[]){
             }
             system->current_block.solution = _solution;
             system->current_block.winner = this_miner.pid;
+            this_miner.coins++;
             give_coin(system->miners, system->num_miners, this_miner.pid);
             sem_post(&(system->mutex));
-            sem_post(&(system->empty));
             /* ------------- end prot --------------- */
             sleep_time.tv_sec = 0;
-            sleep_time.tv_nsec = 250000000; // sleep for voting, 0.25s
+            sleep_time.tv_nsec = 150000000; // sleep for voting, 0.15s
             nanosleep(&sleep_time, NULL);
             // when voting is done, send block to register
             write(miner2register[1], &(system->current_block), sizeof(Block));
             // set last block to current block and start again
-            sem_wait(&(system->empty));
             sem_wait(&(system->mutex));
             /* ----------- Protected ----------- */
             system->last_block = system->current_block; // update System
@@ -418,16 +398,13 @@ int main(int argc, char *argv[]){
                     kill(system->miners[i].pid, SIGUSR1);
             }
             sem_post(&(system->mutex));
-            sem_post(&(system->fill));
         } else { // loser pepeHands
-            sem_wait(&(system->empty));
             sem_wait(&(system->mutex));
             /* ----------- Protected ----------- */
             system->current_block.miners[system->current_block.total_votes] = this_miner;
             system->current_block.favorable_votes++;
             system->current_block.total_votes++;
             sem_post(&(system->mutex));
-            sem_post(&(system->fill));
             /* ------------- end prot --------------- */
             sigsuspend(&a); // wait for SIGUSR1, means start of next round
         }
@@ -437,14 +414,11 @@ int main(int argc, char *argv[]){
     free(threads);
     free(miner_data);
     // delete miner from shared memory
-    sem_wait(&(system->empty));
     sem_wait(&(system->mutex));
     /* ----------- Protected ----------- */
     if(system->num_miners == 1){ // last miner
         printf("\nLast miner finished, deleting shared memory\n");
         sem_destroy(&(system->mutex));
-        sem_destroy(&(system->empty));
-        sem_destroy(&(system->fill));
         delete_miner(system->miners, &(system->num_miners), this_miner.pid);
         munmap(system, sizeof(System));
         shm_unlink(SYSTEM_SHM);
@@ -452,7 +426,6 @@ int main(int argc, char *argv[]){
     }
     delete_miner(system->miners, &(system->num_miners), this_miner.pid);
     sem_post(&(system->mutex));
-    sem_post(&(system->fill));
     munmap(system, sizeof(System));
     shm_unlink(SYSTEM_SHM);
     /* ------------- end prot --------------- */

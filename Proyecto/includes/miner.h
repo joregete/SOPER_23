@@ -50,8 +50,6 @@ typedef struct _system{
     uint8_t num_miners; // number of active miners in the system
     Block last_block; // last block mined
     Block current_block; // current block being mined
-    sem_t mutex; // mutex for the shared memory
-    sem_t empty; // semaphore to protect shared memory
-    sem_t fill; // semaphore to protect shared memory
+    sem_t mutex; // protection for shared memory
     uint8_t monitor_up; // flag to indicate if the monitor is up
 } System;
