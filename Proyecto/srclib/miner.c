@@ -67,14 +67,13 @@ void *work(void* args){
  * @param target target to be solved
  * @param miner miner that created the block
  */
-void init_block(Block *block, short last_id, int target, Miner *miner) {
+void init_block(Block *block, short last_id, int target) {
     block->id = last_id + 1;
     block->target = target;
     block->solution = 0;
     block->winner = 0;
     block->total_votes = 0;
     block->favorable_votes = 0;
-    block->miners[0] = *miner;
 }
 
 /**
@@ -323,7 +322,7 @@ int main(int argc, char *argv[]){
     // FIRST ROUND MANAGEMENT
     if(first_miner_flag == 1){
         Block first_block;
-        init_block(&first_block, -1, 0, &this_miner); // initialize first block ever
+        init_block(&first_block, -1, 0); // initialize first block ever
         sem_wait(&(system->empty));
         sem_wait(&(system->mutex));
         /* ----------- Protected ----------- */
@@ -411,7 +410,7 @@ int main(int argc, char *argv[]){
             /* ----------- Protected ----------- */
             system->last_block = system->current_block; // update System
             Block new_block; // create new block for the next round
-            init_block(&new_block, system->last_block.id, system->last_block.solution, &this_miner);
+            init_block(&new_block, system->last_block.id, system->last_block.solution);
             system->current_block = new_block;
             // send sigusr1 to all miners except this one, means start of next round
             for(i = 0; i < system->num_miners; i++){
