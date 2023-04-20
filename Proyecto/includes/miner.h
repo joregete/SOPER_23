@@ -14,6 +14,8 @@
 #include <sys/mman.h>
 
 #define MAX_MINERS 100
+#define MAX_MSG 7
+#define MQ_NAME "/mq_facepulls"
 
 /**
  * @brief Miner structure
@@ -23,6 +25,9 @@ typedef struct _miner{
     short coins; // coins the miner owns
 } Miner;
 
+/**
+ * @brief Miner Data structure
+ */
 typedef struct _minerData {
     long start;
     long end;
@@ -42,6 +47,12 @@ typedef struct _block{
     uint8_t favorable_votes; // favorable votes for this block
 } Block;
 
+typedef struct _message{
+    Block block;
+} MESSAGE;
+
+#define SIZE sizeof(MESSAGE)
+
 /**
  * @brief System structure, this is the shared memory
  */
@@ -51,5 +62,4 @@ typedef struct _system{
     Block last_block; // last block mined
     Block current_block; // current block being mined
     sem_t mutex; // protection for shared memory
-    uint8_t monitor_up; // flag to indicate if the monitor is up
 } System;

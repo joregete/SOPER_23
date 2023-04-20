@@ -1,0 +1,243 @@
+/**
+* @file facepulls.c
+* @brief Comprobador/Monitor
+* @author Enmanuel, Jorge
+* @version 1.0
+* @date 2023-04-14
+*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/shm.h>
+#include <sys/mman.h>
+#include <semaphore.h>
+#include "../includes/miner.h"
+#include "../includes/common.h"
+
+#define BUFFER_LENGTH 7
+#define SHM_NAME "/shm_facepulls"
+
+/* ----------------------------------------- GLOBALS ---------------------------------------- */
+
+struct timespec delay;
+
+typedef struct _sharedMemory{
+    Block blocks[BUFFER_LENGTH];
+    sem_t gym_mutex;
+    sem_t gym_empty;
+    sem_t gym_fill;
+    uint8_t using;
+    uint8_t reading;
+    uint8_t writing;
+} SharedMemory;
+
+
+/* ----------------------------------------- FUNCTIONS ---------------------------------------*/
+/**
+ * @brief Comprobador is called when the shared memory does not exist, it creates it and
+ *        starts listening to the MQ for messages from the miners and updates the shared memory
+ * @param lag (int) time to wait between each message
+ * @return void
+*/
+void comprobador(int lag){
+    int fd_shm, index;
+    SharedMemory *shmem = NULL;
+    MESSAGE msg;
+    mqd_t mq;
+    struct mq_attr attr;
+    
+    printf(">> Comprobador\n");
+
+    //open shared memory
+    if((fd_shm = shm_open (SHM_NAME, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1){
+        perror("shm_open");
+        exit(EXIT_FAILURE);
+    }
+
+    // Resize of the mmeory segment
+    if(ftruncate(fd_shm, sizeof(SharedMemory)) == -1){
+        perror("ftruncate");
+        shm_unlink(SHM_NAME);
+        // close_unlink();
+        exit(EXIT_FAILURE);
+    }
+
+    // Mapping of the memory segment
+    shmem = mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
+    close(fd_shm);
+    if(shmem == MAP_FAILED){
+        perror("mmap");
+        shm_unlink(SHM_NAME);
+        exit(EXIT_FAILURE);
+    }
+
+    // Initialize the shared memory
+    SharedMemory initialize = {
+        .using = 0,
+        .reading = 0,
+        .writing = 0
+    };
+    memcpy(shmem, &initialize, sizeof(SharedMemory));
+
+    // Initialize the semaphores
+    if (sem_init(&(shmem->gym_mutex), 1, 1) == -1){
+        perror("sem_init");
+        shm_unlink(SHM_NAME);
+        exit(EXIT_FAILURE);
+    }
+
+    if(sem_init(&(shmem->gym_empty), 1, BUFFER_LENGTH) == -1){
+        perror("sem_init");
+        sem_destroy(&(shmem->gym_mutex));
+        shm_unlink(SHM_NAME);
+        exit(EXIT_FAILURE);
+    }
+
+    if(sem_init(&shmem->gym_fill, 1, 0) == -1){
+        perror("sem_init");
+        sem_destroy(&(shmem->gym_mutex));
+        sem_destroy(&(shmem->gym_empty));
+        shm_unlink(SHM_NAME);
+        exit(EXIT_FAILURE);
+    }
+
+    //set message queue attributes
+    attr = (struct mq_attr){
+        .mq_flags = 0,
+        .mq_maxmsg = MAX_MSG,
+        .mq_msgsize = SIZE,
+        .mq_curmsgs = 0
+    };
+
+    if((mq = mq_open(MQ_NAME, O_CREAT | O_RDONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t)-1){
+        perror("mq_open");
+        if(shmem->using == 1){
+            sem_destroy(&(shmem->gym_mutex));
+            sem_destroy(&(shmem->gym_empty));
+            sem_destroy(&(shmem->gym_fill));
+            shm_unlink(SHM_NAME);
+        }
+        shmem->using--;
+        munmap(shmem, sizeof(SharedMemory));
+        exit(EXIT_FAILURE);
+    }
+
+    mq_unlink(MQ_NAME); // as early as possible
+    while(1){
+        // receive message from MQ
+        if(mq_receive(mq, (char *)&msg, SIZE, NULL) == -1){
+            perror("mq_receive");
+            if(shmem->using == 1){
+                sem_destroy(&(shmem->gym_mutex));
+                sem_destroy(&(shmem->gym_empty));
+                sem_destroy(&(shmem->gym_fill));
+                shm_unlink(SHM_NAME);
+            }
+            shmem->using--;
+            mq_close(mq);
+            munmap(shmem, sizeof(SharedMemory));
+            exit(EXIT_FAILURE);
+        }
+
+        sem_wait(&(shmem->gym_empty));
+        sem_wait(&(shmem->gym_mutex));
+
+        /* ----------- Protected ----------- */
+        index = shmem->writing % BUFFER_LENGTH;
+        shmem->writing++;
+        shmem->blocks[index] = msg.block;
+        /* ------------- end prot --------------- */
+        
+        sem_post(&(shmem->gym_mutex));
+        sem_post(&(shmem->gym_fill));
+
+        delay.tv_sec = 0; // espera 0 segundos
+        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
+        nanosleep(&delay, NULL);
+    }
+}
+
+/**
+ * @brief Monitor is called when the shared memory exists, it reads it and prints the info
+ * @param fd_shm (int) file descriptor of the shared memory
+ * @param lag (int) time to wait between each message
+ * @return void
+*/
+void monitor(int fd_shm, int lag){
+    SharedMemory *shmem = NULL;
+    int aux_reading = 0;
+    short aux_flag = 0;
+    uint8_t num_miners = 0, i;
+    Block read_block;
+    
+    // Mapping of the memory segment
+    shmem = mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
+    close(fd_shm);
+    if(shmem == MAP_FAILED){
+        perror("mmap");
+        shm_unlink(SHM_NAME);
+        exit(EXIT_FAILURE);
+    }
+
+    sem_wait(&(shmem->gym_mutex));
+    /* ----------- Protected ----------- */
+
+    shmem->using++;
+
+    /* ------------- end prot --------------- */
+    sem_post(&(shmem->gym_mutex));
+
+    fprintf(stdout,"[%08d] Printing blocks...\n", getpid ());
+    while(1){
+        sem_wait(&(shmem->gym_fill));
+        sem_wait(&(shmem->gym_mutex));
+        /* ----------- Protected ----------- */
+
+        aux_reading = shmem->reading % BUFFER_LENGTH;
+        shmem->reading++;
+        read_block = shmem->blocks[aux_reading];
+        sem_post(&(shmem->gym_mutex));
+        sem_post(&(shmem->gym_empty));
+        
+        /* ------------- end prot --------------- */
+
+        if(read_block.favorable_votes == read_block.total_votes)
+        num_miners = read_block.total_votes;
+        fprintf(stdout, "Id:\t\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution\t%08ld\nVotes:\t\t%d/%d",
+                    read_block.id, read_block.winner, read_block.target, read_block.solution, read_block.favorable_votes, num_miners);
+        read_block.favorable_votes == num_miners ? fprintf(stdout, "\t(accepted) WidePeepoHappy") : fprintf(stdout, "\t(rejected) pepeHands");
+        fprintf(stdout, "\nWallets:");
+        for(i = 0; i < num_miners; i++)
+            fprintf(stdout, "\t%d:%02d", read_block.miners[i].pid, read_block.miners[i].coins);
+        fprintf(stdout, "\n-----------------------\n");
+        
+        delay.tv_sec = 0; // espera 0 segundos
+        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
+        nanosleep(&delay, NULL);
+    }
+}
+
+
+/* -----------------------------------------   MAIN   --------------------------------------- */
+
+int main(int argc, char *argv[]){
+    int lag = 0, fd_shm;
+    if(argc != 2){
+        printf("Usage: %s <lag>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    lag = atoi(argv[1]);
+
+    // if shm exixts, calls monitor else calls comprobador
+    fd_shm = shm_open(SHM_NAME, O_RDWR, 0666);
+    if (fd_shm == -1) // -1 shm does not exist
+        comprobador(lag); // comprobador creates it
+    else
+        monitor(fd_shm, lag); // monitor reads it
+
+    shm_unlink(SHM_NAME);
+    mq_unlink(MQ_NAME); 
+
+    return 0;
+}

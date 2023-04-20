@@ -32,7 +32,6 @@ void signal_handler(int sig) {
     if (sig == SIGALRM) {
         printf("Miner %d finishing by alarm...\n", getpid());
         shutdown = 1;
-        // raise(SIGINT);
     }
 }
 
@@ -377,7 +376,7 @@ int main(int argc, char *argv[]){
             system->current_block.solution = _solution;
             system->current_block.winner = this_miner.pid;
             this_miner.coins++;
-            give_coin(system->miners, system->num_miners, this_miner.pid);
+            // give_coin(system->miners, system->num_miners, this_miner.pid);
             sem_post(&(system->mutex));
             /* ------------- end prot --------------- */
             sleep_time.tv_sec = 0;
