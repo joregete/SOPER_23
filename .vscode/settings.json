@@ -3,6 +3,7 @@
         "mman.h": "c",
         "stat.h": "c",
         "types.h": "c",
-        "miner.h": "c"
+        "miner.h": "c",
+        "signal.h": "c"
     }
 }
