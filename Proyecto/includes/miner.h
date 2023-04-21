@@ -16,7 +16,7 @@
 #include <sys/mman.h>
 
 #define MAX_MINERS 100
-#define MAX_MSG 7
+#define MAX_MSG 9
 #define MQ_NAME "/mq_facepulls"
 
 /**
@@ -60,4 +60,5 @@ typedef struct _system{
     Block last_block; // last block mined
     Block current_block; // current block being mined
     sem_t mutex; // protection for shared memory
+    uint8_t monitor_up; // flag to check if the monitor is up
 } System;

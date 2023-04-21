@@ -14,12 +14,13 @@
 #include "../includes/miner.h"
 #include "../includes/common.h"
 
-#define BUFFER_LENGTH 7
+#define BUFFER_LENGTH 10
 #define SHM_NAME "/facepulls_shm"
 
 /* ----------------------------------------- GLOBALS ---------------------------------------- */
 
 struct timespec delay;
+volatile sig_atomic_t shutdown = 0;
 
 typedef struct _sharedMemory{
     Block blocks[BUFFER_LENGTH];
@@ -33,6 +34,7 @@ typedef struct _sharedMemory{
 
 
 /* ----------------------------------------- FUNCTIONS ---------------------------------------*/
+
 /**
  * @brief Comprobador is called when the shared memory does not exist, it creates it and
  *        starts listening to the MQ for messages from the miners and updates the shared memory
@@ -40,11 +42,12 @@ typedef struct _sharedMemory{
  * @return void
 */
 void comprobador(){
-    int fd_shm, index;
+    int fd_shm, index, fd_sys;
     SharedMemory *shmem = NULL;
     Block msg;
     mqd_t mq;
     struct mq_attr attr;
+    System *_system;
     
     //open shared memory
     if((fd_shm = shm_open (SHM_NAME, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1){
@@ -121,7 +124,31 @@ void comprobador(){
     }
 
     mq_unlink(MQ_NAME); // as early as possible
-    while(1){
+
+    //NOTIFY MINERS THAT MONITOR IS UP
+    fd_sys = shm_open("/deadlift_shm", O_RDWR, 0666);
+    if(fd_sys == -1){
+        do {
+            sleep(1);
+            if(errno == EINTR){
+                shm_unlink(SHM_NAME);
+                mq_unlink(MQ_NAME);
+            }
+            fd_sys = shm_open("/deadlift_shm", O_RDWR, 0666);
+        } while (fd_sys == -1);
+    }
+    _system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_sys, 0);
+    close(fd_sys);
+    if(_system == MAP_FAILED){
+        perror("mmap");
+        shm_unlink("/deadlift_shm");
+        exit(EXIT_FAILURE);
+    }
+    sem_wait(&(_system->mutex));
+    _system->monitor_up = 1;
+    sem_post(&(_system->mutex));
+
+    while(!shutdown){
         // receive message from MQ
         if(mq_receive(mq, (char *)&msg, SIZE, NULL) == -1){
             perror("mq_receive");
@@ -130,6 +157,7 @@ void comprobador(){
                 sem_destroy(&(shmem->gym_empty));
                 sem_destroy(&(shmem->gym_fill));
                 shm_unlink(SHM_NAME);
+                shm_unlink("/deadlift_shm");
             }
             shmem->using--;
             mq_close(mq);
@@ -149,6 +177,11 @@ void comprobador(){
         sem_post(&(shmem->gym_mutex));
         sem_post(&(shmem->gym_fill));
     }
+    sem_wait(&(_system->mutex));
+    _system->monitor_up = 0;
+    sem_post(&(_system->mutex));
+    mq_close(mq);
+    shm_unlink("/deadlift_shm");
 }
 
 /**
@@ -185,7 +218,7 @@ void monitor(){
     sem_post(&(shmem->gym_mutex));
 
     fprintf(stdout,"[%08d] Printing blocks...\n", getpid ());
-    while(1){
+    while(!shutdown){
         sem_wait(&(shmem->gym_fill));
         sem_wait(&(shmem->gym_mutex));
         /* ----------- Protected ----------- */
@@ -200,7 +233,7 @@ void monitor(){
 
         if(read_block.favorable_votes == read_block.total_votes)
         num_miners = read_block.total_votes;
-        fprintf(stdout, "Id:\t\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution:\t%08ld\nVotes:\t\t%d/%d",
+        fprintf(stdout, "Id:\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution:\t%08ld\nVotes:\t\t%d/%d",
                     read_block.id, read_block.winner, read_block.target, read_block.solution, read_block.favorable_votes, num_miners);
         read_block.favorable_votes == num_miners ? fprintf(stdout, "\t(accepted) WidePeepoHappy") : fprintf(stdout, "\t(rejected) pepeHands");
         fprintf(stdout, "\nWallets:");

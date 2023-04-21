@@ -15,7 +15,8 @@
 volatile sig_atomic_t sigusr2_received = 0; // indicates SIGUSR2 reception
 volatile sig_atomic_t magic_flag = 0; // indicates mining solution was found
 volatile sig_atomic_t shutdown = 0; // indicates system has to shutdown
-mqd_t mq = -1; // message queue
+mqd_t mq = -2; // message queue
+struct mq_attr attr; // message queue attributes
 long _solution = 0; // solution to the target
 
 /**
@@ -65,13 +66,24 @@ void *work(void* args){
  * @param _block 
  */
 void send_queue(Block *_block){
-    if(mq == -1)
-        mq = mq_open(MQ_NAME, O_WRONLY);
-    if(mq != (mqd_t)-1) { // monitor is up, send block
-        if(mq_send(mq, (char*)_block, sizeof(Block), 0) == -1) {
-            perror("mq_send");
-            return;
+    if(mq == -2) { // queue needs to be initialized again or for the first time
+        // Initialize the queue attributes
+        attr = (struct mq_attr){
+            .mq_flags = 0,
+            .mq_maxmsg = MAX_MSG,
+            .mq_msgsize = SIZE,
+            .mq_curmsgs = 0
+        };
+        // Open the message queue
+        if((mq = mq_open(MQ_NAME, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
+            perror("mq_open");
+            exit(EXIT_FAILURE);
         }
+    }
+    // send message
+    if(mq_send(mq, (char*)_block, sizeof(Block), 2) == -1) {
+        perror("mq_send");
+        return;
     }
 }
 
@@ -256,6 +268,8 @@ int main(int argc, char *argv[]){
             exit(EXIT_FAILURE);
         }
 
+        system->monitor_up = 0;
+
         // Initialize the semaphores
         if (sem_init(&(system->mutex), 1, 1) == -1){
             perror("sem_init");
@@ -401,7 +415,9 @@ int main(int argc, char *argv[]){
             nanosleep(&sleep_time, NULL);
             // when voting is done, send block to register
             write(miner2register[1], &(system->current_block), sizeof(Block));
-            send_queue(&(system->current_block));
+            if(system->monitor_up == 1)
+                send_queue(&(system->current_block));
+            else mq = -2;
             // set last block to current block and start again
             sem_wait(&(system->mutex));
             /* ----------- Protected ----------- */
