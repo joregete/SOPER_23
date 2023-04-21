@@ -15,7 +15,7 @@
 #include "../includes/common.h"
 
 #define BUFFER_LENGTH 7
-#define SHM_NAME "/shm_facepulls"
+#define SHM_NAME "/facepulls_shm"
 
 /* ----------------------------------------- GLOBALS ---------------------------------------- */
 
@@ -39,15 +39,13 @@ typedef struct _sharedMemory{
  * @param lag (int) time to wait between each message
  * @return void
 */
-void comprobador(int lag){
+void comprobador(){
     int fd_shm, index;
     SharedMemory *shmem = NULL;
-    MESSAGE msg;
+    Block msg;
     mqd_t mq;
     struct mq_attr attr;
     
-    printf(">> Comprobador\n");
-
     //open shared memory
     if((fd_shm = shm_open (SHM_NAME, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1){
         perror("shm_open");
@@ -145,15 +143,11 @@ void comprobador(int lag){
         /* ----------- Protected ----------- */
         index = shmem->writing % BUFFER_LENGTH;
         shmem->writing++;
-        shmem->blocks[index] = msg.block;
+        shmem->blocks[index] = msg;
         /* ------------- end prot --------------- */
         
         sem_post(&(shmem->gym_mutex));
         sem_post(&(shmem->gym_fill));
-
-        delay.tv_sec = 0; // espera 0 segundos
-        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
-        nanosleep(&delay, NULL);
     }
 }
 
@@ -163,13 +157,16 @@ void comprobador(int lag){
  * @param lag (int) time to wait between each message
  * @return void
 */
-void monitor(int fd_shm, int lag){
+void monitor(){
     SharedMemory *shmem = NULL;
-    int aux_reading = 0;
-    short aux_flag = 0;
+    int aux_reading = 0, fd_shm = -1;
     uint8_t num_miners = 0, i;
     Block read_block;
-    
+
+    do {
+        fd_shm = shm_open(SHM_NAME, O_RDWR, 0);
+    } while(fd_shm == -1 && errno == ENOENT);
+
     // Mapping of the memory segment
     shmem = mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
     close(fd_shm);
@@ -203,17 +200,13 @@ void monitor(int fd_shm, int lag){
 
         if(read_block.favorable_votes == read_block.total_votes)
         num_miners = read_block.total_votes;
-        fprintf(stdout, "Id:\t\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution\t%08ld\nVotes:\t\t%d/%d",
+        fprintf(stdout, "Id:\t\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution:\t%08ld\nVotes:\t\t%d/%d",
                     read_block.id, read_block.winner, read_block.target, read_block.solution, read_block.favorable_votes, num_miners);
         read_block.favorable_votes == num_miners ? fprintf(stdout, "\t(accepted) WidePeepoHappy") : fprintf(stdout, "\t(rejected) pepeHands");
         fprintf(stdout, "\nWallets:");
         for(i = 0; i < num_miners; i++)
             fprintf(stdout, "\t%d:%02d", read_block.miners[i].pid, read_block.miners[i].coins);
         fprintf(stdout, "\n-----------------------\n");
-        
-        delay.tv_sec = 0; // espera 0 segundos
-        delay.tv_nsec = lag * 1000000; // espera 'lag' milisegundos
-        nanosleep(&delay, NULL);
     }
 }
 
@@ -221,23 +214,19 @@ void monitor(int fd_shm, int lag){
 /* -----------------------------------------   MAIN   --------------------------------------- */
 
 int main(int argc, char *argv[]){
-    int lag = 0, fd_shm;
-    if(argc != 2){
-        printf("Usage: %s <lag>\n", argv[0]);
+    pid_t pid = fork();
+    if(pid == -1){
+        perror("fork");
         exit(EXIT_FAILURE);
     }
-
-    lag = atoi(argv[1]);
-
-    // if shm exixts, calls monitor else calls comprobador
-    fd_shm = shm_open(SHM_NAME, O_RDWR, 0666);
-    if (fd_shm == -1) // -1 shm does not exist
-        comprobador(lag); // comprobador creates it
+    if(pid != 0){ // parent
+        comprobador();
+        wait(NULL);
+    }
     else
-        monitor(fd_shm, lag); // monitor reads it
+        monitor();
 
     shm_unlink(SHM_NAME);
     mq_unlink(MQ_NAME); 
-
     return 0;
 }

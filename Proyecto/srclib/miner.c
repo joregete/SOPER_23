@@ -15,6 +15,7 @@
 volatile sig_atomic_t sigusr2_received = 0; // indicates SIGUSR2 reception
 volatile sig_atomic_t magic_flag = 0; // indicates mining solution was found
 volatile sig_atomic_t shutdown = 0; // indicates system has to shutdown
+mqd_t mq = -1; // message queue
 long _solution = 0; // solution to the target
 
 /**
@@ -56,6 +57,22 @@ void *work(void* args){
         }
     }
     return NULL;
+}
+
+/**
+ * @brief checks for the existance of a message queue. if it exists, send Block
+ * if it does not, do nothing
+ * @param _block 
+ */
+void send_queue(Block *_block){
+    if(mq == -1)
+        mq = mq_open(MQ_NAME, O_WRONLY);
+    if(mq != (mqd_t)-1) { // monitor is up, send block
+        if(mq_send(mq, (char*)_block, sizeof(Block), 0) == -1) {
+            perror("mq_send");
+            return;
+        }
+    }
 }
 
 /**
@@ -150,7 +167,7 @@ void _register(int pipe_read){
         }
         // print info into the file
         num_miners = _block.total_votes;
-        dprintf(fd, "Id:\t\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution\t%08ld\nVotes:\t\t%d/%d",
+        dprintf(fd, "Id:\t\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution:\t%08ld\nVotes:\t\t%d/%d",
                     _block.id, _block.winner, _block.target, _block.solution, _block.favorable_votes, num_miners);
         _block.favorable_votes == num_miners ? dprintf(fd, "\t(accepted) WidePeepoHappy") : dprintf(fd, "\t(rejected) pepeHands");
         dprintf(fd, "\nWallets:");
@@ -384,6 +401,7 @@ int main(int argc, char *argv[]){
             nanosleep(&sleep_time, NULL);
             // when voting is done, send block to register
             write(miner2register[1], &(system->current_block), sizeof(Block));
+            send_queue(&(system->current_block));
             // set last block to current block and start again
             sem_wait(&(system->mutex));
             /* ----------- Protected ----------- */

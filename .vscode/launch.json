@@ -8,7 +8,7 @@
             "name": "(gdb) Iniciar",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/home/jojje/Desktop/Universidad/SOPER_23/Proyecto/miner",
+            "program": "/home/jojje/Desktop/Universidad/SOPER_23/Proyecto/monitor",
             "args": ["1", "3"],
             "stopAtEntry": false,
             "cwd": "/home/jojje/Desktop/Universidad/SOPER_23/Proyecto",

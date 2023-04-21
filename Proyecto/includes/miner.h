@@ -9,6 +9,8 @@
 #include <signal.h>
 #include <time.h>
 #include <wait.h>
+#include <mqueue.h>
+#include <errno.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -47,11 +49,7 @@ typedef struct _block{
     uint8_t favorable_votes; // favorable votes for this block
 } Block;
 
-typedef struct _message{
-    Block block;
-} MESSAGE;
-
-#define SIZE sizeof(MESSAGE)
+#define SIZE sizeof(Block)
 
 /**
  * @brief System structure, this is the shared memory
