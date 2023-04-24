@@ -109,7 +109,6 @@ void comprobador(){
         .mq_msgsize = SIZE,
         .mq_curmsgs = 0
     };
-
     if((mq = mq_open(MQ_NAME, O_CREAT | O_RDONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t)-1){
         perror("mq_open");
         if(shmem->using == 1){
@@ -123,8 +122,6 @@ void comprobador(){
         exit(EXIT_FAILURE);
     }
 
-    mq_unlink(MQ_NAME); // as early as possible
-
     //NOTIFY MINERS THAT MONITOR IS UP
     fd_sys = shm_open("/deadlift_shm", O_RDWR, 0666);
     if(fd_sys == -1){
@@ -133,6 +130,7 @@ void comprobador(){
             if(errno == EINTR){
                 shm_unlink(SHM_NAME);
                 mq_unlink(MQ_NAME);
+                exit(EXIT_FAILURE);
             }
             fd_sys = shm_open("/deadlift_shm", O_RDWR, 0666);
         } while (fd_sys == -1);
@@ -157,6 +155,7 @@ void comprobador(){
                 sem_destroy(&(shmem->gym_empty));
                 sem_destroy(&(shmem->gym_fill));
                 shm_unlink(SHM_NAME);
+                mq_unlink(MQ_NAME);
                 shm_unlink("/deadlift_shm");
             }
             shmem->using--;
@@ -181,6 +180,7 @@ void comprobador(){
     _system->monitor_up = 0;
     sem_post(&(_system->mutex));
     mq_close(mq);
+    mq_unlink(MQ_NAME);
     shm_unlink("/deadlift_shm");
 }
 

@@ -14,15 +14,31 @@
 
 volatile sig_atomic_t sigusr2_received = 0; // indicates SIGUSR2 reception
 volatile sig_atomic_t magic_flag = 0; // indicates mining solution was found
+volatile sig_atomic_t sigusr1_received = 0; // indicates SIGUSR1 reception
 volatile sig_atomic_t shutdown = 0; // indicates system has to shutdown
 mqd_t mq = -2; // message queue
 struct mq_attr attr; // message queue attributes
 long _solution = 0; // solution to the target
 
+
+
+/**
+ * @brief private function to user the sem wait function safely
+ * @param sem_id semaphore id
+ * @return 0 if success, -1 if error 
+ */
+int _sem_wait_safe(sem_t *sem_id) {
+  while (sem_wait(sem_id))
+    if (errno == EINTR) errno = 0;
+    else return -1;
+  return 0;
+}
+
 /**
  * @brief private function to handle signals
  * 
  * @param sig signal received
+ * @return void
  */
 void signal_handler(int sig) {
     if (sig == SIGINT) {
@@ -35,12 +51,15 @@ void signal_handler(int sig) {
         printf("Miner %d finishing by alarm...\n", getpid());
         shutdown = 1;
     }
+    if(sig == SIGUSR1){
+        sigusr1_received = 1;
+    }
 }
 
 /**
  * @brief private function that the miner threads will execute
  * 
- * @param args 
+ * @param args (MinerData structure, to be casted) 
  * @return void* 
  */
 void *work(void* args){
@@ -63,7 +82,8 @@ void *work(void* args){
 /**
  * @brief checks for the existance of a message queue. if it exists, send Block
  * if it does not, do nothing
- * @param _block 
+ * @param _block (Block structure)
+ * @return void
  */
 void send_queue(Block *_block){
     if(mq == -2) { // queue needs to be initialized again or for the first time
@@ -75,7 +95,7 @@ void send_queue(Block *_block){
             .mq_curmsgs = 0
         };
         // Open the message queue
-        if((mq = mq_open(MQ_NAME, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
+        if((mq = mq_open(MQ_NAME, O_WRONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
             perror("mq_open");
             exit(EXIT_FAILURE);
         }
@@ -94,6 +114,7 @@ void send_queue(Block *_block){
  * @param last_id id of the last block
  * @param target target to be solved
  * @param miner miner that created the block
+ * @return void
  */
 void init_block(Block *block, short last_id, int target) {
     block->id = last_id + 1;
@@ -110,7 +131,7 @@ void init_block(Block *block, short last_id, int target) {
  * @param miners array
  * @param num_miners number of miners in the array
  * @param pid pid of the miner to find
- * @return uint8_t index of the miner in the array 
+ * @return index of the miner in the array (uint8_t), -1 if not found
  */
 uint8_t find_miner_index(Miner *miners, uint8_t num_miners, pid_t pid) {
     uint8_t i;
@@ -128,6 +149,7 @@ uint8_t find_miner_index(Miner *miners, uint8_t num_miners, pid_t pid) {
  * @param miners miners array
  * @param num_miners number of miners in the array
  * @param pid pid of the miner to give the coin to
+ * @return void
  */
 void give_coin(Miner *miners, uint8_t num_miners, pid_t pid) {
     uint8_t index = find_miner_index(miners, num_miners, pid);
@@ -142,6 +164,7 @@ void give_coin(Miner *miners, uint8_t num_miners, pid_t pid) {
  * @param miners miners array
  * @param num_miners number of miners in the array
  * @param pid pid of the miner to delete
+ * @return void
  */
 void delete_miner(Miner *miners, uint8_t *num_miners, pid_t pid) {
     uint8_t index = find_miner_index(miners, *num_miners, pid);
@@ -154,9 +177,10 @@ void delete_miner(Miner *miners, uint8_t *num_miners, pid_t pid) {
 }
 
 /**
- * @brief funtionn that the child process will execute
+ * @brief function that the child process will execute
  * 
  * @param pipe_read read end of the pipe, used to read the blocks
+ * @return void
  */
 void _register(int pipe_read){
     Block _block;
@@ -193,20 +217,28 @@ void _register(int pipe_read){
 
 /**
  * @brief Main function for the miner process
+ * @param argc number of arguments
+ * @param argv array of arguments
  * @return 0 Exit success or 1 Exit failure
  */
 int main(int argc, char *argv[]){
+    ssize_t n_sent;
     pid_t pid;
     pthread_t *threads;
     short n_sec, nthreads, fd_shm;
-    uint8_t first_miner_flag = 0, i, j;
+    uint8_t first_miner_flag = 0, i, j, sleep_ret;
     int miner2register[2]; // pipe
     long target = 0;
+
+    /* --------------- Signals --------------- */
     struct sigaction act;
-    sigset_t a;
+    sigset_t mask, oldmask;
+    
+    /* --------------- Shared Memory --------------- */
     struct timespec sleep_time;
     System *system; // structure representing the shared memory
 
+    /* --------------- Check parameters --------------- */
     if (argc != 3){
         printf("Usage: %s <NSECONDS> <NTHREADS>\n", argv[0]);
         exit(EXIT_FAILURE);
@@ -224,6 +256,7 @@ int main(int argc, char *argv[]){
         exit(EXIT_FAILURE);
     }
 
+    /* --------------- Pipe creation --------------- */
     if(pipe(miner2register) < 0){
         perror("pipe");
         exit(EXIT_FAILURE);
@@ -278,7 +311,7 @@ int main(int argc, char *argv[]){
         }
 
     } else { // shm exists
-        // mapping of the memory segment
+        // we map the memory segment
         system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
         close(fd_shm);
         if(system == MAP_FAILED){
@@ -296,6 +329,7 @@ int main(int argc, char *argv[]){
     act.sa_handler = signal_handler; // assign signal handler
     act.sa_flags = 0;
     sigfillset(&(act.sa_mask)); // start with a full mask
+
     // choose signals upon which the handler'll be called
     if(sigaction(SIGINT, &act, NULL) < 0){
         perror("sigaction");
@@ -322,7 +356,7 @@ int main(int argc, char *argv[]){
     this_miner.pid = getpid();
     this_miner.coins = 0;
 
-    sem_wait(&(system->mutex));
+    _sem_wait_safe(&(system->mutex));
     /* ----------- Protected ----------- */
     system->miners[system->num_miners] = this_miner;
     system->num_miners++;
@@ -330,16 +364,14 @@ int main(int argc, char *argv[]){
     /* ------------- end prot --------------- */
     printf("\nminer %d registered\n", this_miner.pid);
     // remove SIGUSR1 from auxiliar mask, for whenever this miner needs to be suspended
-    sigfillset(&a);
-    sigdelset(&a, SIGUSR1);
-    sigdelset(&a, SIGINT);
-    sigdelset(&a, SIGALRM);
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR1);
 
     // FIRST ROUND MANAGEMENT
     if(first_miner_flag == 1){
         Block first_block;
         init_block(&first_block, -1, 0); // initialize first block ever
-        sem_wait(&(system->mutex));
+        _sem_wait_safe(&(system->mutex));
         /* ----------- Protected ----------- */
         system->current_block = first_block; // first block ready to get mined
         // send sigusr1 to all miners except this one, trigger start of first round
@@ -349,8 +381,13 @@ int main(int argc, char *argv[]){
         }
         sem_post(&(system->mutex));
         /* ------------- end prot --------------- */        
-    } else
-        sigsuspend(&a); // wait for SIGUSR1, wait for start of first round
+    } else{
+        sigprocmask(SIG_BLOCK, &mask, &oldmask); // block SIGUSR1
+        while(!sigusr1_received){
+            sigsuspend(&oldmask); // wait for SIGUSR1
+        }
+        sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock SIGUSR1
+    }
     
     // allocate memory for threads
     threads = (pthread_t*) malloc(nthreads * sizeof(pthread_t));
@@ -366,10 +403,11 @@ int main(int argc, char *argv[]){
         exit(EXIT_FAILURE);
     }
     while(!shutdown){
+        sigusr1_received = 0;
         sigusr2_received = 0;
         magic_flag = 0;
         // get this round's target
-        sem_wait(&(system->mutex));
+        _sem_wait_safe(&(system->mutex));
         /* ----------- Protected ----------- */
         target = system->current_block.target;
         sem_post(&(system->mutex));
@@ -397,7 +435,7 @@ int main(int argc, char *argv[]){
         }
         // check if this dude is the first to finish
         if(sigusr2_received == 0){ // WINNER WINNER CHICKEN DINNER
-            sem_wait(&(system->mutex));
+            _sem_wait_safe(&(system->mutex));
             /* ----------- Protected ----------- */
             // update current block and send sigusr2 to all miners
             for(i = 0; i < system->num_miners; i++){
@@ -407,19 +445,28 @@ int main(int argc, char *argv[]){
             system->current_block.solution = _solution;
             system->current_block.winner = this_miner.pid;
             this_miner.coins++;
-            // give_coin(system->miners, system->num_miners, this_miner.pid);
             sem_post(&(system->mutex));
             /* ------------- end prot --------------- */
             sleep_time.tv_sec = 0;
             sleep_time.tv_nsec = 150000000; // sleep for voting, 0.15s
-            nanosleep(&sleep_time, NULL);
+            sleep_ret = nanosleep(&sleep_time, NULL);
+            if(sleep_ret == -1){
+                perror("nanosleep");
+                free(miner_data);
+                free(threads);
+                exit(EXIT_FAILURE);
+            }
             // when voting is done, send block to register
-            write(miner2register[1], &(system->current_block), sizeof(Block));
-            if(system->monitor_up == 1)
+            n_sent = write(miner2register[1], &(system->current_block), sizeof(Block));
+            if(n_sent < 0){
+                perror("Error WRITING to the pipe in the miner");
+                exit(EXIT_FAILURE);
+            }
+            if(system->monitor_up == 1) // check if monitor is expecting blocks
                 send_queue(&(system->current_block));
             else mq = -2;
             // set last block to current block and start again
-            sem_wait(&(system->mutex));
+            _sem_wait_safe(&(system->mutex));
             /* ----------- Protected ----------- */
             system->last_block = system->current_block; // update System
             Block new_block; // create new block for the next round
@@ -432,22 +479,27 @@ int main(int argc, char *argv[]){
             }
             sem_post(&(system->mutex));
         } else { // loser pepeHands
-            sem_wait(&(system->mutex));
+            _sem_wait_safe(&(system->mutex));
             /* ----------- Protected ----------- */
             system->current_block.miners[system->current_block.total_votes] = this_miner;
             system->current_block.favorable_votes++;
             system->current_block.total_votes++;
             sem_post(&(system->mutex));
             /* ------------- end prot --------------- */
-            sigsuspend(&a); // wait for SIGUSR1, means start of next round
+            sigprocmask(SIG_BLOCK, &mask, &oldmask); // block SIGUSR1
+            while(!sigusr1_received){
+                sigsuspend(&oldmask); // wait for SIGUSR1
+            }
+            sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock SIGUSR1
         }
     }
-    // SHUTDOWN
+    // ------------------------------ MINER SHUTDOWN ------------------------------
     close(miner2register[1]);
     free(threads);
     free(miner_data);
+
     // delete miner from shared memory
-    sem_wait(&(system->mutex));
+    _sem_wait_safe(&(system->mutex));
     /* ----------- Protected ----------- */
     if(system->num_miners == 1){ // last miner
         printf("\nLast miner finished, deleting shared memory\n");
@@ -457,6 +509,7 @@ int main(int argc, char *argv[]){
         shm_unlink(SYSTEM_SHM);
         return 0;
     }
+
     delete_miner(system->miners, &(system->num_miners), this_miner.pid);
     sem_post(&(system->mutex));
     munmap(system, sizeof(System));
