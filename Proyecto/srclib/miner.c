@@ -1,121 +1,5 @@
-/**
- * @file miner.c
- * @author Enmanuel Abreu & Jorge Álvarez
- * @brief program that a miner process will execute
- * @date 2023-04-18
- * 
- * @copyright Copyright (c) 2023
- */
-
 #include "../includes/miner.h"
-#include "../includes/pow.h"
 
-#define SYSTEM_SHM "/deadlift_shm"
-
-volatile sig_atomic_t sigusr2_received = 0; // indicates SIGUSR2 reception
-volatile sig_atomic_t magic_flag = 0; // indicates mining solution was found
-volatile sig_atomic_t sigusr1_received = 0; // indicates SIGUSR1 reception
-volatile sig_atomic_t shutdown = 0; // indicates system has to shutdown
-mqd_t mq = -2; // message queue
-struct mq_attr attr; // message queue attributes
-long _solution = 0; // solution to the target
-
-
-
-/**
- * @brief private function to user the sem wait function safely
- * @param sem_id semaphore id
- * @return 0 if success, -1 if error 
- */
-int _sem_wait_safe(sem_t *sem_id) {
-  while (sem_wait(sem_id))
-    if (errno == EINTR) errno = 0;
-    else return -1;
-  return 0;
-}
-
-/**
- * @brief private function to handle signals
- * 
- * @param sig signal received
- * @return void
- */
-void signal_handler(int sig) {
-    if (sig == SIGINT) {
-        shutdown = 1;
-    }
-    if (sig == SIGUSR2) {
-        sigusr2_received = 1;
-    }
-    if (sig == SIGALRM) {
-        printf("Miner %d finishing by alarm...\n", getpid());
-        shutdown = 1;
-    }
-    if(sig == SIGUSR1){
-        sigusr1_received = 1;
-    }
-}
-
-/**
- * @brief private function that the miner threads will execute
- * 
- * @param args (MinerData structure, to be casted) 
- * @return void* 
- */
-void *work(void* args){
-    long i, result;
-    MinerData *miner_data = (MinerData*) args;
-    for(i = miner_data->start; i < miner_data->end; i++){
-        if(magic_flag)
-            return NULL;
-        
-        result = pow_hash(i);
-        if(result == miner_data->target){
-            _solution = i;
-            magic_flag = 1;
-            return NULL;
-        }
-    }
-    return NULL;
-}
-
-/**
- * @brief checks for the existance of a message queue. if it exists, send Block
- * if it does not, do nothing
- * @param _block (Block structure)
- * @return void
- */
-void send_queue(Block *_block){
-    if(mq == -2) { // queue needs to be initialized again or for the first time
-        // Initialize the queue attributes
-        attr = (struct mq_attr){
-            .mq_flags = 0,
-            .mq_maxmsg = MAX_MSG,
-            .mq_msgsize = SIZE,
-            .mq_curmsgs = 0
-        };
-        // Open the message queue
-        if((mq = mq_open(MQ_NAME, O_WRONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t) -1){
-            perror("mq_open");
-            exit(EXIT_FAILURE);
-        }
-    }
-    // send message
-    if(mq_send(mq, (char*)_block, sizeof(Block), 2) == -1) {
-        perror("mq_send");
-        return;
-    }
-}
-
-/**
- * @brief initialize a new block
- * 
- * @param block block to initialize
- * @param last_id id of the last block
- * @param target target to be solved
- * @param miner miner that created the block
- * @return void
- */
 void init_block(Block *block, short last_id, int target) {
     block->id = last_id + 1;
     block->target = target;
@@ -123,16 +7,9 @@ void init_block(Block *block, short last_id, int target) {
     block->winner = 0;
     block->total_votes = 0;
     block->favorable_votes = 0;
+    block->num_voters = 0;
 }
 
-/**
- * @brief private function to find the index of a miner in the miners array
- * 
- * @param miners array
- * @param num_miners number of miners in the array
- * @param pid pid of the miner to find
- * @return index of the miner in the array (uint8_t), -1 if not found
- */
 uint8_t find_miner_index(Miner *miners, uint8_t num_miners, pid_t pid) {
     uint8_t i;
     for (i = 0; i < num_miners; i++) {
@@ -143,29 +20,6 @@ uint8_t find_miner_index(Miner *miners, uint8_t num_miners, pid_t pid) {
     return -1;
 }
 
-/**
- * @brief private function to give a coin to a miner
- * 
- * @param miners miners array
- * @param num_miners number of miners in the array
- * @param pid pid of the miner to give the coin to
- * @return void
- */
-void give_coin(Miner *miners, uint8_t num_miners, pid_t pid) {
-    uint8_t index = find_miner_index(miners, num_miners, pid);
-    if (index != -1) {
-        miners[index].coins++;
-    }
-}
-
-/**
- * @brief private function to delete a miner from the miners array
- * 
- * @param miners miners array
- * @param num_miners number of miners in the array
- * @param pid pid of the miner to delete
- * @return void
- */
 void delete_miner(Miner *miners, uint8_t *num_miners, pid_t pid) {
     uint8_t index = find_miner_index(miners, *num_miners, pid);
     if (index != -1) {
@@ -176,12 +30,6 @@ void delete_miner(Miner *miners, uint8_t *num_miners, pid_t pid) {
     }
 }
 
-/**
- * @brief function that the child process will execute
- * 
- * @param pipe_read read end of the pipe, used to read the blocks
- * @return void
- */
 void _register(int pipe_read){
     Block _block;
     uint8_t ret = 0, num_miners = 0, i = 0;
@@ -205,7 +53,7 @@ void _register(int pipe_read){
         num_miners = _block.total_votes;
         dprintf(fd, "Id:\t\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution:\t%08ld\nVotes:\t\t%d/%d",
                     _block.id, _block.winner, _block.target, _block.solution, _block.favorable_votes, num_miners);
-        _block.favorable_votes == num_miners ? dprintf(fd, "\t(accepted) WidePeepoHappy") : dprintf(fd, "\t(rejected) pepeHands");
+        _block.favorable_votes == num_miners ? dprintf(fd, "\t(validated) WidePeepoHappy") : dprintf(fd, "\t(rejected) pepeHands");
         dprintf(fd, "\nWallets:");
         for(i = 0; i < num_miners; i++)
             dprintf(fd, "\t%d:%02d", _block.miners[i].pid, _block.miners[i].coins);
@@ -215,306 +63,53 @@ void _register(int pipe_read){
     exit(0);
 }
 
-/**
- * @brief Main function for the miner process
- * @param argc number of arguments
- * @param argv array of arguments
- * @return 0 Exit success or 1 Exit failure
- */
-int main(int argc, char *argv[]){
-    ssize_t n_sent;
-    pid_t pid;
-    pthread_t *threads;
-    short n_sec, nthreads, fd_shm;
-    uint8_t first_miner_flag = 0, i, j, sleep_ret;
-    int miner2register[2]; // pipe
-    long target = 0;
-
-    /* --------------- Signals --------------- */
-    struct sigaction act;
-    sigset_t mask, oldmask;
-    
-    /* --------------- Shared Memory --------------- */
-    struct timespec sleep_time;
-    System *system; // structure representing the shared memory
-
-    /* --------------- Check parameters --------------- */
+void check_args(int argc, char *argv[], uint8_t *n_sec, uint8_t *nthreads){
     if (argc != 3){
-        printf("Usage: %s <NSECONDS> <NTHREADS>\n", argv[0]);
+        fprintf(stdout, "Usage: %s <NSECONDS> <NTHREADS>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
-
-    n_sec = atoi(argv[1]);
-    if (n_sec <= 0){
-        fprintf(stderr, "NSECONDS has to be greater than 0\n");
+    *n_sec = atoi(argv[1]);
+    if (*n_sec <= 0 || *n_sec > 60){
+        fprintf(stdout, "NSECONDS must be a value between 0 and 60\n");
         exit(EXIT_FAILURE);
     }
-
-    nthreads = atoi(argv[2]);
-    if (nthreads <= 0){
-        fprintf(stderr, "NTHREADS has to be greater than 0\n");
+    *nthreads = atoi(argv[2]);
+    if (*nthreads <= 0 || *nthreads > 9){
+        fprintf(stdout, "NTHREADS must be a value between 0 and 9\n");
         exit(EXIT_FAILURE);
     }
+}
 
-    /* --------------- Pipe creation --------------- */
-    if(pipe(miner2register) < 0){
-        perror("pipe");
+System* create_system(){
+    System *system;
+    int fd_shm;
+    //create shared memory
+    if((fd_shm = shm_open (SYSTEM_SHM, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1){
+        perror("shm_open");
         exit(EXIT_FAILURE);
     }
-
-    pid = fork();
-    if(pid < 0){
-        perror("fork");
-        exit(EXIT_FAILURE);
-    }
-
-    if(pid == 0){ // register
-        close(miner2register[1]); // close write end
-        _register(miner2register[0]);
-    }
-
-    // miner
-    close(miner2register[0]); // close read end
-    // if shm exixts, open it else create it
-    fd_shm = shm_open(SYSTEM_SHM, O_RDWR, 0666);
-    if (fd_shm == -1){ // -1 shm does not exist
-        printf("\nCreating shared memory\n");
-        first_miner_flag = 1;
-        //create shared memory
-        if((fd_shm = shm_open (SYSTEM_SHM, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)) == -1){
-            perror("shm_open");
-            exit(EXIT_FAILURE);
-        }
-        // Resize of the memory segment
-        if(ftruncate(fd_shm, sizeof(System)) == -1){
-            perror("ftruncate");
-            shm_unlink(SYSTEM_SHM);
-            exit(EXIT_FAILURE);
-        }
-
-        // Mapping of the memory segment
-        system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
-        close(fd_shm);
-        if(system == MAP_FAILED){
-            perror("mmap");
-            shm_unlink(SYSTEM_SHM);
-            exit(EXIT_FAILURE);
-        }
-
-        system->monitor_up = 0;
-
-        // Initialize the semaphores
-        if (sem_init(&(system->mutex), 1, 1) == -1){
-            perror("sem_init");
-            shm_unlink(SYSTEM_SHM);
-            exit(EXIT_FAILURE);
-        }
-
-    } else { // shm exists
-        // we map the memory segment
-        system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
-        close(fd_shm);
-        if(system == MAP_FAILED){
-            perror("mmap");
-            shm_unlink(SYSTEM_SHM);
-            exit(EXIT_FAILURE);
-        }
-        if(system->num_miners == MAX_MINERS){
-            printf("\nsystem doesn't accept more miners\n");
-            munmap(system, sizeof(System));
-            shm_unlink(SYSTEM_SHM);
-            exit(EXIT_SUCCESS);
-        }
-    }
-    act.sa_handler = signal_handler; // assign signal handler
-    act.sa_flags = 0;
-    sigfillset(&(act.sa_mask)); // start with a full mask
-
-    // choose signals upon which the handler'll be called
-    if(sigaction(SIGINT, &act, NULL) < 0){
-        perror("sigaction");
-        return 1;
-    }
-    if(sigaction(SIGUSR1, &act, NULL) < 0){
-        perror("sigaction");
-        return 1;
-    }
-    if(sigaction(SIGUSR2, &act, NULL) < 0){
-        perror("sigaction");
-        return 1;
-    }
-    if(sigaction(SIGALRM, &act, NULL) < 0){
-        perror("sigaction");
-        return 1;
-    }
-    sigdelset(&(act.sa_mask), SIGINT); // unblock SIGINT
-    sigdelset(&(act.sa_mask), SIGALRM); // unblock SIGALRM
-    alarm(n_sec); // set alarm for the end of the process
-
-    // log new miner representing this process into system
-    Miner this_miner; 
-    this_miner.pid = getpid();
-    this_miner.coins = 0;
-
-    _sem_wait_safe(&(system->mutex));
-    /* ----------- Protected ----------- */
-    system->miners[system->num_miners] = this_miner;
-    system->num_miners++;
-    sem_post(&(system->mutex));
-    /* ------------- end prot --------------- */
-    printf("\nminer %d registered\n", this_miner.pid);
-    // remove SIGUSR1 from auxiliar mask, for whenever this miner needs to be suspended
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGUSR1);
-
-    // FIRST ROUND MANAGEMENT
-    if(first_miner_flag == 1){
-        Block first_block;
-        init_block(&first_block, -1, 0); // initialize first block ever
-        _sem_wait_safe(&(system->mutex));
-        /* ----------- Protected ----------- */
-        system->current_block = first_block; // first block ready to get mined
-        // send sigusr1 to all miners except this one, trigger start of first round
-        for(i = 0; i < system->num_miners; i++){
-            if(system->miners[i].pid != this_miner.pid)
-                kill(system->miners[i].pid, SIGUSR1);
-        }
-        sem_post(&(system->mutex));
-        /* ------------- end prot --------------- */        
-    } else{
-        sigprocmask(SIG_BLOCK, &mask, &oldmask); // block SIGUSR1
-        while(!sigusr1_received){
-            sigsuspend(&oldmask); // wait for SIGUSR1
-        }
-        sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock SIGUSR1
-    }
-    
-    // allocate memory for threads
-    threads = (pthread_t*) malloc(nthreads * sizeof(pthread_t));
-    if(threads == NULL){
-        perror("malloc threads");
-        exit(EXIT_FAILURE);
-    }
-    // unblock SIGUSR2, which is used to start voting
-    sigdelset(&(act.sa_mask), SIGUSR2);
-    MinerData *miner_data = (MinerData*) malloc(sizeof(MinerData)*nthreads);
-    if(miner_data == NULL){
-        perror("malloc minerData");
-        exit(EXIT_FAILURE);
-    }
-    while(!shutdown){
-        sigusr1_received = 0;
-        sigusr2_received = 0;
-        magic_flag = 0;
-        // get this round's target
-        _sem_wait_safe(&(system->mutex));
-        /* ----------- Protected ----------- */
-        target = system->current_block.target;
-        sem_post(&(system->mutex));
-        /* ------------- end prot --------------- */
-        // start mining
-        for(j = 0; j < nthreads; j++){
-            miner_data[j].start = j * ((POW_LIMIT -1 ) / nthreads);
-            miner_data[j].end = (j+1) * ((POW_LIMIT -1 ) / nthreads);
-            miner_data[j].target = target;
-            if(pthread_create(&threads[j], NULL, work, &miner_data[j])){
-                perror("pthread_create");
-                free(miner_data);
-                free(threads);
-                exit(EXIT_FAILURE);
-            }
-        }
-        for(j = 0; j < nthreads; j++){
-            if(pthread_join(threads[j], NULL)){
-                perror("pthread_join");
-                    free(miner_data);
-                    free(threads);
-                    exit(EXIT_FAILURE);
-                break;
-            }
-        }
-        // check if this dude is the first to finish
-        if(sigusr2_received == 0){ // WINNER WINNER CHICKEN DINNER
-            _sem_wait_safe(&(system->mutex));
-            /* ----------- Protected ----------- */
-            // update current block and send sigusr2 to all miners
-            for(i = 0; i < system->num_miners; i++){
-                if(system->miners[i].pid != this_miner.pid)
-                    kill(system->miners[i].pid, SIGUSR2);
-            }
-            system->current_block.solution = _solution;
-            system->current_block.winner = this_miner.pid;
-            this_miner.coins++;
-            sem_post(&(system->mutex));
-            /* ------------- end prot --------------- */
-            sleep_time.tv_sec = 0;
-            sleep_time.tv_nsec = 150000000; // sleep for voting, 0.15s
-            sleep_ret = nanosleep(&sleep_time, NULL);
-            if(sleep_ret == -1){
-                perror("nanosleep");
-                free(miner_data);
-                free(threads);
-                exit(EXIT_FAILURE);
-            }
-            // when voting is done, send block to register
-            n_sent = write(miner2register[1], &(system->current_block), sizeof(Block));
-            if(n_sent < 0){
-                perror("Error WRITING to the pipe in the miner");
-                exit(EXIT_FAILURE);
-            }
-            if(system->monitor_up == 1) // check if monitor is expecting blocks
-                send_queue(&(system->current_block));
-            else mq = -2;
-            // set last block to current block and start again
-            _sem_wait_safe(&(system->mutex));
-            /* ----------- Protected ----------- */
-            system->last_block = system->current_block; // update System
-            Block new_block; // create new block for the next round
-            init_block(&new_block, system->last_block.id, system->last_block.solution);
-            system->current_block = new_block;
-            // send sigusr1 to all miners except this one, means start of next round
-            for(i = 0; i < system->num_miners; i++){
-                if(system->miners[i].pid != this_miner.pid)
-                    kill(system->miners[i].pid, SIGUSR1);
-            }
-            sem_post(&(system->mutex));
-        } else { // loser pepeHands
-            _sem_wait_safe(&(system->mutex));
-            /* ----------- Protected ----------- */
-            system->current_block.miners[system->current_block.total_votes] = this_miner;
-            system->current_block.favorable_votes++;
-            system->current_block.total_votes++;
-            sem_post(&(system->mutex));
-            /* ------------- end prot --------------- */
-            sigprocmask(SIG_BLOCK, &mask, &oldmask); // block SIGUSR1
-            while(!sigusr1_received){
-                sigsuspend(&oldmask); // wait for SIGUSR1
-            }
-            sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock SIGUSR1
-        }
-    }
-    // ------------------------------ MINER SHUTDOWN ------------------------------
-    close(miner2register[1]);
-    free(threads);
-    free(miner_data);
-
-    // delete miner from shared memory
-    _sem_wait_safe(&(system->mutex));
-    /* ----------- Protected ----------- */
-    if(system->num_miners == 1){ // last miner
-        printf("\nLast miner finished, deleting shared memory\n");
-        sem_destroy(&(system->mutex));
-        delete_miner(system->miners, &(system->num_miners), this_miner.pid);
-        munmap(system, sizeof(System));
+    // Resize of the memory segment
+    if(ftruncate(fd_shm, sizeof(System)) == -1){
+        perror("ftruncate");
         shm_unlink(SYSTEM_SHM);
-        return 0;
+        exit(EXIT_FAILURE);
+    }
+    // Mapping of the memory segment
+    system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
+    close(fd_shm);
+    if(system == MAP_FAILED){
+        perror("mmap");
+        shm_unlink(SYSTEM_SHM);
+        exit(EXIT_FAILURE);
     }
 
-    delete_miner(system->miners, &(system->num_miners), this_miner.pid);
-    sem_post(&(system->mutex));
-    munmap(system, sizeof(System));
-    shm_unlink(SYSTEM_SHM);
-    /* ------------- end prot --------------- */
-    wait(NULL);
-    return 0;
+    // Initialize the semaphores
+    if (sem_init(&(system->mutex), 1, 1) == -1){
+        perror("sem_init");
+        shm_unlink(SYSTEM_SHM);
+        exit(EXIT_FAILURE);
+    }
+    system->monitor_up = 0;
+
+    return system;
 }

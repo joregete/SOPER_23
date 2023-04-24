@@ -11,8 +11,8 @@
 #include <sys/shm.h>
 #include <sys/mman.h>
 #include <semaphore.h>
+#include <signal.h>
 #include "../includes/miner.h"
-#include "../includes/common.h"
 
 #define BUFFER_LENGTH 10
 #define SHM_NAME "/facepulls_shm"
@@ -21,6 +21,11 @@
 
 struct timespec delay;
 volatile sig_atomic_t shutdown = 0;
+
+void signal_handler(int signum){
+    fprintf(stdout, "\nfinishing by interrupt...\n");
+    shutdown = 1;
+}
 
 typedef struct _sharedMemory{
     Block blocks[BUFFER_LENGTH];
@@ -31,7 +36,6 @@ typedef struct _sharedMemory{
     uint8_t reading;
     uint8_t writing;
 } SharedMemory;
-
 
 /* ----------------------------------------- FUNCTIONS ---------------------------------------*/
 
@@ -109,6 +113,7 @@ void comprobador(){
         .mq_msgsize = SIZE,
         .mq_curmsgs = 0
     };
+
     if((mq = mq_open(MQ_NAME, O_CREAT | O_RDONLY, S_IRUSR | S_IWUSR, &attr)) == (mqd_t)-1){
         perror("mq_open");
         if(shmem->using == 1){
@@ -123,16 +128,19 @@ void comprobador(){
     }
 
     //NOTIFY MINERS THAT MONITOR IS UP
-    fd_sys = shm_open("/deadlift_shm", O_RDWR, 0666);
+    fd_sys = shm_open(SYSTEM_SHM, O_RDWR, 0666);
     if(fd_sys == -1){
         do {
             sleep(1);
-            if(errno == EINTR){
+            if(errno == EINTR){ // if sleep was interrupted, shutdown was forced
+                sem_destroy(&(shmem->gym_mutex));
+                sem_destroy(&(shmem->gym_empty));
+                sem_destroy(&(shmem->gym_fill));
                 shm_unlink(SHM_NAME);
                 mq_unlink(MQ_NAME);
-                exit(EXIT_FAILURE);
+                return;
             }
-            fd_sys = shm_open("/deadlift_shm", O_RDWR, 0666);
+            fd_sys = shm_open(SYSTEM_SHM, O_RDWR, 0666);
         } while (fd_sys == -1);
     }
     _system = mmap(NULL, sizeof(System), PROT_READ | PROT_WRITE, MAP_SHARED, fd_sys, 0);
@@ -149,21 +157,24 @@ void comprobador(){
     while(!shutdown){
         // receive message from MQ
         if(mq_receive(mq, (char *)&msg, SIZE, NULL) == -1){
-            perror("mq_receive");
             if(shmem->using == 1){
                 sem_destroy(&(shmem->gym_mutex));
                 sem_destroy(&(shmem->gym_empty));
                 sem_destroy(&(shmem->gym_fill));
                 shm_unlink(SHM_NAME);
-                mq_unlink(MQ_NAME);
                 shm_unlink("/deadlift_shm");
             }
             shmem->using--;
             mq_close(mq);
             munmap(shmem, sizeof(SharedMemory));
-            exit(EXIT_FAILURE);
+            if(errno = EINTR){
+                exit(EXIT_SUCCESS);
+            }
+            else{
+                perror("mq_receive");
+                exit(EXIT_FAILURE);
+            }
         }
-
         sem_wait(&(shmem->gym_empty));
         sem_wait(&(shmem->gym_mutex));
 
@@ -180,7 +191,6 @@ void comprobador(){
     _system->monitor_up = 0;
     sem_post(&(_system->mutex));
     mq_close(mq);
-    mq_unlink(MQ_NAME);
     shm_unlink("/deadlift_shm");
 }
 
@@ -211,9 +221,7 @@ void monitor(){
 
     sem_wait(&(shmem->gym_mutex));
     /* ----------- Protected ----------- */
-
     shmem->using++;
-
     /* ------------- end prot --------------- */
     sem_post(&(shmem->gym_mutex));
 
@@ -230,12 +238,12 @@ void monitor(){
         sem_post(&(shmem->gym_empty));
         
         /* ------------- end prot --------------- */
-
+        if(shutdown) break;
         if(read_block.favorable_votes == read_block.total_votes)
-        num_miners = read_block.total_votes;
+            num_miners = read_block.total_votes;
         fprintf(stdout, "Id:\t\t%04d\nWinner:\t\t%d\nTarget:\t\t%ld\nSolution:\t%08ld\nVotes:\t\t%d/%d",
                     read_block.id, read_block.winner, read_block.target, read_block.solution, read_block.favorable_votes, num_miners);
-        read_block.favorable_votes == num_miners ? fprintf(stdout, "\t(accepted) WidePeepoHappy") : fprintf(stdout, "\t(rejected) pepeHands");
+        read_block.favorable_votes == num_miners ? fprintf(stdout, "\t(validated) WidePeepoHappy") : fprintf(stdout, "\t(rejected) pepeHands");
         fprintf(stdout, "\nWallets:");
         for(i = 0; i < num_miners; i++)
             fprintf(stdout, "\t%d:%02d", read_block.miners[i].pid, read_block.miners[i].coins);
@@ -246,7 +254,17 @@ void monitor(){
 
 /* -----------------------------------------   MAIN   --------------------------------------- */
 
-int main(int argc, char *argv[]){
+int main(){
+    struct sigaction act;
+    act.sa_handler = signal_handler; // assign signal handler
+    act.sa_flags = 0;
+    sigfillset(&(act.sa_mask)); // start with a full mask
+    // choose signals upon which the handler'll be called
+    if(sigaction(SIGINT, &act, NULL) < 0){
+        perror("sigaction");
+        return 1;
+    }
+    sigdelset(&(act.sa_mask), SIGINT); // unblock SIGINT
     pid_t pid = fork();
     if(pid == -1){
         perror("fork");

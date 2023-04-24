@@ -1,5 +1,6 @@
 INCLUDES = includes/
 SRCLIB = srclib/
+LAUNCH = launch/
 CC = gcc -pedantic -pthread
 CFLAGS = -Wall -g
 
@@ -9,11 +10,14 @@ clean :
 	rm -f *.o miner monitor *.txt
 	rm /dev/shm/facepulls_shm
 
-miner : $(SRCLIB)miner.c $(SRCLIB)pow.c
+miner : $(LAUNCH)miner_launch.c $(SRCLIB)pow.c $(SRCLIB)miner.c
 	$(CC) $(CFLAGS) $^ -o $@
 
-monitor : $(SRCLIB)monitor.c
+monitor : $(LAUNCH)monitor_launch.c
 	$(CC) $(CFLAGS) $^ -o $@
 
-runm:
+runmon:
 	./monitor
+
+runmin:
+	./miner 5 3
