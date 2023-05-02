@@ -8,7 +8,9 @@ all : miner monitor
 
 clean :
 	rm -f *.o miner monitor *.txt
-	rm /dev/shm/facepulls_shm
+	
+rmshm : 
+	rm /dev/shm/deadlift_shm /dev/shm/facepulls_shm
 
 miner : $(LAUNCH)miner_launch.c $(SRCLIB)pow.c $(SRCLIB)miner.c
 	$(CC) $(CFLAGS) $^ -o $@

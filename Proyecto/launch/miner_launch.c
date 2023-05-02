@@ -107,7 +107,7 @@ void send_queue(Block *_block){
 int main(int argc, char *argv[]){
     pid_t pid;
     pthread_t *threads;
-    uint8_t first_miner_flag = 0, i, j, n_sec, nthreads;
+    uint8_t first_miner_flag = 0, i, j, n_sec, nthreads, _voting = 0;
     int miner2register[2], ret = -2, fd_shm;
     long target = 0;
     struct sigaction act;
@@ -270,11 +270,10 @@ int main(int argc, char *argv[]){
         for(j = 0; j < nthreads; j++){
             if(pthread_join(threads[j], NULL)){
                 perror("pthread_join");
-                    free(miner_data);
-                    free(threads);
-                    sem_destroy(&(system->mutex));
-                    exit(EXIT_FAILURE);
-                break;
+                free(miner_data);
+                free(threads);
+                sem_destroy(&(system->mutex));
+                exit(EXIT_FAILURE);
             }
         }
         // check if this dude is the first to finish
@@ -296,17 +295,20 @@ int main(int argc, char *argv[]){
             sleep_time.tv_sec = 0;
             sleep_time.tv_nsec = 100000000; // 0.1 seconds
             // wait until all miners have voted
-            while(system->current_block.total_votes != system->current_block.num_voters){
+            while(system->current_block.total_votes != system->current_block.num_voters && _voting != 5){
                 ret = nanosleep(&sleep_time, NULL);
                 if(ret == -1){
                     free(miner_data);
                     free(threads);
                     sem_destroy(&(system->mutex));
+                    shm_unlink(SYSTEM_SHM);
                     if(errno != EINTR)
                         perror("nanosleep");                    
                     exit(EXIT_FAILURE);
                 }
+                _voting++;
             }
+            _voting = 0; // reset voting counter
             // when voting is done, check if the solution got accepted
             if(system->current_block.total_votes == system->current_block.favorable_votes){
                 system->current_block.winner = this_miner.pid;
